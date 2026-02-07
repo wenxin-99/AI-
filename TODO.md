@@ -3,22 +3,23 @@
 ## Phase 1: 前后端 API 集成
 
 ### 前端 API 客户端
-- [ ] 创建 axios 配置和拦截器
-- [ ] 实现 API 服务层 (auth, user, xray, gost, traffic)
-- [ ] 添加 JWT token 管理
-- [ ] 实现请求错误处理
+- [x] 创建 axios 配置和拦截器
+- [x] 实现 API 服务层 (auth, user, xray, gost, traffic)
+- [x] 添加 JWT token 管理
+- [x] 实现请求错误处理
 
 ### 页面集成
-- [ ] 登录页 - 对接真实登录 API
+- [x] 登录页 - 对接真实登录 API
 - [ ] 仪表板 - 获取实时统计数据
 - [ ] Xray 管理 - CRUD 操作集成
 - [ ] Gost 管理 - CRUD 操作集成
 - [ ] 流量统计 - 图表数据集成
 
 ### 后端准备
-- [ ] 配置 CORS 允许前端访问
-- [ ] 添加默认管理员账户初始化
+- [x] 配置 CORS 允许前端访问
+- [x] 添加默认管理员账户初始化
 - [ ] 实现健康检查接口
+- [ ] 测试后端编译和运行
 
 ## Phase 2: Xray 和 Gost 引擎实际调用
 
