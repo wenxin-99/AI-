@@ -84,18 +84,16 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               {navigation.map((item) => {
                 const isActive = location === item.href || location.startsWith(item.href + "/");
                 return (
-                  <Link key={item.name} href={item.href}>
-                    <a
-                      className={cn(
-                        "flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-200",
-                        isActive
-                          ? "bg-gradient-to-r from-cyan-500/20 to-purple-600/20 text-white border border-white/20"
-                          : "text-white/70 hover:text-white hover:bg-white/5"
-                      )}
-                    >
-                      <item.icon className="w-5 h-5" />
-                      <span className="font-medium">{item.name}</span>
-                    </a>
+                  <Link key={item.name} href={item.href}
+                    className={cn(
+                      "flex items-center space-x-3 px-4 py-3 rounded-lg transition-all duration-200",
+                      isActive
+                        ? "bg-gradient-to-r from-cyan-500/20 to-purple-600/20 text-white border border-white/20"
+                        : "text-white/70 hover:text-white hover:bg-white/5"
+                    )}
+                  >
+                    <item.icon className="w-5 h-5" />
+                    <span className="font-medium">{item.name}</span>
                   </Link>
                 );
               })}
