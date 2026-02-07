@@ -14,6 +14,7 @@ import TrafficStats from "./pages/TrafficStats";
 import SubscriptionManage from "./pages/SubscriptionManage";
 import NodeManage from "./pages/NodeManage";
 import BBROptimize from "./pages/BBROptimize";
+import Certificates from "./pages/Certificates";
 
 
 function Router() {
@@ -29,6 +30,7 @@ function Router() {
       <Route path={"/subscription"} component={SubscriptionManage} />
       <Route path={"/nodes"} component={NodeManage} />
       <Route path={"/bbr"} component={BBROptimize} />
+      <Route path={"/certificates"} component={Certificates} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
