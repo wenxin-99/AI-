@@ -899,6 +899,18 @@ export default function NodeManage() {
                         安装后节点每 30 秒自动同步配置，无需手动操作
                       </p>
                     </div>
+
+                    {/* 国内镜像加速说明 */}
+                    <div className="bg-amber-500/5 border border-amber-400/20 rounded-lg p-3 space-y-2 text-xs mt-3">
+                      <div className="flex items-center gap-1.5 text-amber-400 font-medium">
+                        <Globe className="w-3.5 h-3.5" />
+                        国内 VPS 自动加速
+                      </div>
+                      <p className="text-white/50">
+                        脚本会自动检测网络环境，国内 VPS 将通过 GitHub 镜像加速下载 Xray/Gost，无需手动配置代理。
+                        支持多个镜像源自动切换，确保安装成功。
+                      </p>
+                    </div>
                   </div>
                 </div>
 
@@ -907,6 +919,7 @@ export default function NodeManage() {
                   <div className="bg-white/[0.02] border border-white/5 rounded-lg p-3 text-xs text-white/40 space-y-1">
                     <p>支持系统: Ubuntu, Debian, CentOS, RHEL</p>
                     <p>支持架构: x86_64 (amd64), aarch64 (arm64)</p>
+                    <p>网络环境: 自动检测国内/国外，国内自动使用镜像加速</p>
                     <p>安装目录: /opt/uniproxy-node/</p>
                     <p>Agent 服务: systemctl status uniproxy-agent</p>
                   </div>
