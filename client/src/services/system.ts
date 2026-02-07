@@ -1,4 +1,4 @@
-import api, { ApiResponse } from "@/lib/api";
+import api from "@/lib/api";
 
 export interface SystemInfo {
   hostname: string;
@@ -27,25 +27,19 @@ export interface SystemStatus {
 export const systemService = {
   // 获取系统信息
   getInfo: async (): Promise<SystemInfo> => {
-    const response = await api.get<any, ApiResponse<SystemInfo>>(
-      "/api/v1/system/info"
-    );
-    return response.data;
+    const response: any = await api.get("/api/v1/system/info");
+    return response?.data || response;
   },
 
   // 获取系统状态
   getStatus: async (): Promise<SystemStatus> => {
-    const response = await api.get<any, ApiResponse<SystemStatus>>(
-      "/api/v1/system/status"
-    );
-    return response.data;
+    const response: any = await api.get("/api/v1/system/status");
+    return response?.data || response;
   },
 
   // 健康检查
   healthCheck: async (): Promise<{ status: string }> => {
-    const response = await api.get<any, ApiResponse<{ status: string }>>(
-      "/api/v1/system/health"
-    );
-    return response.data;
+    const response: any = await api.get("/health");
+    return response?.data || response;
   },
 };

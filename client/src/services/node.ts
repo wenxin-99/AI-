@@ -54,12 +54,28 @@ export const nodeService = {
     return response.data as Node;
   },
 
-  // 获取节点列表
+  // 获取节点列表（分页）
+  // 注意：axios响应拦截器已经解包了response.data，所以这里拿到的是后端返回的JSON body
+  // 后端返回格式: { success: true, data: { nodes: [...], total: N, page: N }, message: "..." }
+  // 经过拦截器后变成: { data: { nodes: [...], total: N, page: N }, message: "...", success: true }
+  // 但拦截器返回的是 response.data，即 { success, data: {nodes, total, page}, message }
   list: async (page: number = 1, pageSize: number = 10) => {
-    const response = await apiClient.get("/api/v1/node/list", {
+    const response: any = await apiClient.get("/api/v1/node/list", {
       params: { page, page_size: pageSize },
     });
-    return response.data;
+    // response 已经是 response.data (被拦截器解包)
+    // 即 { success: true, data: { nodes: [...], total, page }, message: "..." }
+    return response;
+  },
+
+  // 获取所有节点（不分页，获取足够多的节点）
+  getAll: async (): Promise<Node[]> => {
+    const response: any = await apiClient.get("/api/v1/node/list", {
+      params: { page: 1, page_size: 100 },
+    });
+    // response 被拦截器解包后是: { success, data: { nodes: [...], total, page }, message }
+    const nodes = response?.data?.nodes || response?.nodes || [];
+    return Array.isArray(nodes) ? nodes : [];
   },
 
   // 切换节点状态

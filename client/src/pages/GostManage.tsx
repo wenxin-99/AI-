@@ -77,8 +77,7 @@ export default function GostManage() {
 
   const fetchNodes = async () => {
     try {
-      const response = await nodeService.getAll();
-      const nodeList = response.data || [];
+      const nodeList = await nodeService.getAll();
       // 只显示在线节点
       setNodes(nodeList.filter((node: Node) => node.status === 'online'));
     } catch (error) {
@@ -89,8 +88,8 @@ export default function GostManage() {
 
   const fetchCertificates = async () => {
     try {
-      const response = await api.get('/certificates');
-      const certs = response?.data?.certificates || response?.data || [];
+      const response: any = await api.get('/api/v1/certificates');
+      const certs = response?.certificates || response?.data?.certificates || [];
       setCertificates(Array.isArray(certs) ? certs : []);
     } catch (error) {
       console.error("Failed to fetch certificates:", error);
@@ -160,7 +159,7 @@ export default function GostManage() {
     }
 
     try {
-      await gostService.createTunnel({
+      const result = await gostService.createTunnel({
         name: formData.name,
         protocol: formData.protocol,
         local_port: parseInt(formData.local_port),
@@ -174,12 +173,14 @@ export default function GostManage() {
         tls_server_name: formData.tls_server_name || undefined,
         skip_verify: formData.skip_verify,
       });
-      toast.success("隧道创建成功");
+      toast.success(result.timedOut ? "隧道创建成功（后端正在重启服务）" : "隧道创建成功");
       setCreateDialogOpen(false);
       resetForm();
-      fetchTunnels();
+      setTimeout(() => fetchTunnels(), 1000);
     } catch (error) {
       console.error("Failed to create tunnel:", error);
+      toast.error("创建隧道失败");
+      setTimeout(() => fetchTunnels(), 1000);
     }
   };
 
@@ -187,7 +188,7 @@ export default function GostManage() {
     if (!selectedTunnel) return;
 
     try {
-      await gostService.updateTunnel(selectedTunnel.id, {
+      const result = await gostService.updateTunnel(selectedTunnel.id, {
         name: formData.name,
         protocol: formData.protocol,
         local_port: parseInt(formData.local_port),
@@ -201,12 +202,14 @@ export default function GostManage() {
         tls_server_name: formData.tls_server_name || undefined,
         skip_verify: formData.skip_verify,
       });
-      toast.success("隧道更新成功");
+      toast.success(result.timedOut ? "隧道更新成功（后端正在重启服务）" : "隧道更新成功");
       setEditDialogOpen(false);
       setSelectedTunnel(null);
-      fetchTunnels();
+      setTimeout(() => fetchTunnels(), 1000);
     } catch (error) {
       console.error("Failed to update tunnel:", error);
+      toast.error("更新隧道失败");
+      setTimeout(() => fetchTunnels(), 1000);
     }
   };
 
@@ -214,11 +217,13 @@ export default function GostManage() {
     if (!confirm("确定要删除此隧道吗?")) return;
 
     try {
-      await gostService.deleteTunnel(id);
-      toast.success("隧道删除成功");
-      fetchTunnels();
+      const result = await gostService.deleteTunnel(id);
+      toast.success(result.timedOut ? "隧道删除成功（后端正在重启服务）" : "隧道删除成功");
+      setTimeout(() => fetchTunnels(), 1000);
     } catch (error) {
       console.error("Failed to delete tunnel:", error);
+      toast.error("删除隧道失败");
+      setTimeout(() => fetchTunnels(), 1000);
     }
   };
 
@@ -226,9 +231,11 @@ export default function GostManage() {
     try {
       await gostService.toggleTunnel(id, !enabled);
       toast.success(enabled ? "隧道已禁用" : "隧道已启用");
-      fetchTunnels();
+      setTimeout(() => fetchTunnels(), 1000);
     } catch (error) {
       console.error("Failed to toggle tunnel:", error);
+      toast.error("切换隧道状态失败");
+      setTimeout(() => fetchTunnels(), 1000);
     }
   };
 
@@ -238,6 +245,7 @@ export default function GostManage() {
       toast.success("Gost 服务重启成功");
     } catch (error) {
       console.error("Failed to restart Gost:", error);
+      toast.info("Gost 服务正在重启中...");
     }
   };
 

@@ -22,40 +22,40 @@ export interface NetworkMetrics {
 export const bbrService = {
   // 获取BBR状态
   getStatus: async () => {
-    const response = await apiClient.get("/bbr/status");
-    return response.data.data as BBRStatus;
+    const response: any = await apiClient.get("/api/v1/bbr/status");
+    return (response?.data || response) as BBRStatus;
   },
 
   // 启用BBR
   enable: async (algorithm: string = "bbr") => {
-    const response = await apiClient.post("/bbr/enable", { algorithm });
-    return response.data;
+    const response: any = await apiClient.post("/api/v1/bbr/enable", { algorithm });
+    return response;
   },
 
   // 禁用BBR
   disable: async () => {
-    const response = await apiClient.post("/bbr/disable");
-    return response.data;
+    const response: any = await apiClient.post("/api/v1/bbr/disable");
+    return response;
   },
 
   // 优化协议
   optimizeProtocol: async (protocol: string, tunnelType?: string) => {
-    const response = await apiClient.post("/bbr/optimize-protocol", {
+    const response: any = await apiClient.post("/api/v1/bbr/optimize-protocol", {
       protocol,
       tunnel_type: tunnelType,
     });
-    return response.data;
+    return response;
   },
 
   // 获取网络指标
   getMetrics: async () => {
-    const response = await apiClient.get("/bbr/metrics");
-    return response.data.data as NetworkMetrics;
+    const response: any = await apiClient.get("/api/v1/bbr/metrics");
+    return (response?.data || response) as NetworkMetrics;
   },
 
   // 自动优化
   autoOptimize: async () => {
-    const response = await apiClient.post("/bbr/auto-optimize");
-    return response.data;
+    const response: any = await apiClient.post("/api/v1/bbr/auto-optimize");
+    return response;
   },
 };

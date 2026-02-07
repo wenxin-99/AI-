@@ -67,8 +67,10 @@ export default function NodeManage() {
   const loadNodes = async () => {
     try {
       setLoading(true);
-      const data = await nodeService.list();
-      setNodes(data.nodes || []);
+      const response: any = await nodeService.list();
+      // response 被拦截器解包后是: { success, data: { nodes: [...], total, page }, message }
+      const nodeList = response?.data?.nodes || response?.nodes || [];
+      setNodes(Array.isArray(nodeList) ? nodeList : []);
     } catch (error) {
       console.error("加载节点列表失败:", error);
       toast.error("加载节点列表失败");

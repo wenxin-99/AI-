@@ -1,5 +1,5 @@
 import DashboardLayout from "@/components/DashboardLayout";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -30,9 +30,9 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Play, Pause, Edit, Trash2, Users, RefreshCw, Shield } from "lucide-react";
+import { Plus, Play, Pause, Edit, Trash2, Users, RefreshCw, Shield, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
-import { xrayService, XrayInbound } from "@/services/xray";
+import { xrayService, type XrayInbound } from "@/services/xray";
 import { nodeService, type Node } from "@/services/node";
 import api from "@/lib/api";
 import LogViewer from "@/components/LogViewer";
@@ -42,17 +42,20 @@ interface Certificate {
   name: string;
   domain: string;
   status: string;
+  cert_type: string;
 }
 
 export default function XrayManage() {
   const [inbounds, setInbounds] = useState<XrayInbound[]>([]);
   const [certificates, setCertificates] = useState<Certificate[]>([]);
   const [nodes, setNodes] = useState<Node[]>([]);
+  const [allNodes, setAllNodes] = useState<Node[]>([]);
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [selectedInbound, setSelectedInbound] = useState<XrayInbound | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string>("");
+  const [toggling, setToggling] = useState<number | null>(null);
   
   // 基础表单状态
   const [formData, setFormData] = useState({
@@ -85,25 +88,22 @@ export default function XrayManage() {
   // Sniffing配置
   const [sniffingEnabled, setSniffingEnabled] = useState(true);
 
-  useEffect(() => {
-    fetchInbounds();
-    fetchCertificates();
-    fetchNodes();
-  }, []);
+  // 自签名证书对话框
+  const [selfSignedDialogOpen, setSelfSignedDialogOpen] = useState(false);
+  const [selfSignedForm, setSelfSignedForm] = useState({ name: "", domain: "" });
 
-  const fetchNodes = async () => {
+  const fetchNodes = useCallback(async () => {
     try {
-      const response = await nodeService.getAll();
-      const nodeList = response.data || [];
-      // 只显示在线节点
+      const nodeList = await nodeService.getAll();
+      setAllNodes(nodeList);
+      // 只显示在线节点用于选择
       setNodes(nodeList.filter((node: Node) => node.status === 'online'));
     } catch (error) {
       console.error('Failed to fetch nodes:', error);
-      toast.error('获取节点列表失败');
     }
-  };
+  }, []);
 
-  const fetchInbounds = async () => {
+  const fetchInbounds = useCallback(async () => {
     try {
       setLoading(true);
       const data = await xrayService.getInbounds();
@@ -114,17 +114,24 @@ export default function XrayManage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchCertificates = async () => {
+  const fetchCertificates = useCallback(async () => {
     try {
-      const response = await api.get('/certificates');
-      const certs = response?.data?.certificates || response?.data || [];
+      const response: any = await api.get('/api/v1/certificates');
+      // 响应拦截器已解包，response 可能是 { certificates: [...], total } 或 { data: { certificates } }
+      const certs = response?.certificates || response?.data?.certificates || [];
       setCertificates(Array.isArray(certs) ? certs : []);
     } catch (error) {
       console.error("Failed to fetch certificates:", error);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchInbounds();
+    fetchCertificates();
+    fetchNodes();
+  }, [fetchInbounds, fetchCertificates, fetchNodes]);
 
   const handleCreate = async () => {
     // 节点选择验证
@@ -183,7 +190,7 @@ export default function XrayManage() {
         metadataOnly: false,
       });
 
-      await xrayService.createInbound({
+      const result = await xrayService.createInbound({
         remark: formData.remark,
         port: parseInt(formData.port),
         protocol: formData.protocol,
@@ -191,13 +198,20 @@ export default function XrayManage() {
         stream_settings: streamSettingsJson,
         sniffing: sniffingJson,
       });
-      toast.success("入站创建成功");
+      if (result.timedOut) {
+        toast.success("入站创建成功（后端正在重启Xray服务）");
+      } else {
+        toast.success("入站创建成功");
+      }
       setCreateDialogOpen(false);
       resetForm();
-      fetchInbounds();
+      // 延迟一下再刷新列表，给后端时间完成数据库写入
+      setTimeout(() => fetchInbounds(), 1000);
     } catch (error) {
       console.error("Failed to create inbound:", error);
       toast.error("创建入站失败");
+      // 即使失败也尝试刷新列表（可能数据已写入但Restart超时）
+      setTimeout(() => fetchInbounds(), 1000);
     }
   };
 
@@ -208,10 +222,10 @@ export default function XrayManage() {
     };
 
     // TCP配置
-    if (streamSettings.network === "tcp" && streamSettings.tcp_header_type !== "none") {
+    if (streamSettings.network === "tcp") {
       settings.tcpSettings = {
         header: {
-          type: streamSettings.tcp_header_type,
+          type: streamSettings.tcp_header_type || "none",
         },
       };
     }
@@ -267,10 +281,16 @@ export default function XrayManage() {
       tls_alpn: "h2,http/1.1",
     });
     setSniffingEnabled(true);
+    setSelectedNodeId("");
   };
 
   const handleEdit = async () => {
     if (!selectedInbound) return;
+
+    if (!formData.remark || !formData.port) {
+      toast.error("请填写完整信息");
+      return;
+    }
 
     try {
       const streamSettingsJson = buildStreamSettings();
@@ -280,7 +300,8 @@ export default function XrayManage() {
         metadataOnly: false,
       });
 
-      await xrayService.updateInbound(selectedInbound.id, {
+      // 必须发送所有必填字段: remark, port, protocol
+      const result = await xrayService.updateInbound(selectedInbound.id, {
         remark: formData.remark,
         port: parseInt(formData.port),
         protocol: formData.protocol,
@@ -288,13 +309,20 @@ export default function XrayManage() {
         stream_settings: streamSettingsJson,
         sniffing: sniffingJson,
       });
-      toast.success("入站更新成功");
+      if (result.timedOut) {
+        toast.success("入站更新成功（后端正在重启Xray服务）");
+      } else {
+        toast.success("入站更新成功");
+      }
       setEditDialogOpen(false);
       resetForm();
-      fetchInbounds();
+      // 延迟刷新列表
+      setTimeout(() => fetchInbounds(), 1000);
     } catch (error) {
       console.error("Failed to update inbound:", error);
       toast.error("更新入站失败");
+      // 即使失败也刷新
+      setTimeout(() => fetchInbounds(), 1000);
     }
   };
 
@@ -302,23 +330,57 @@ export default function XrayManage() {
     if (!confirm("确定要删除此入站吗?")) return;
 
     try {
-      await xrayService.deleteInbound(id);
-      toast.success("入站删除成功");
-      fetchInbounds();
+      const result = await xrayService.deleteInbound(id);
+      if (result.timedOut) {
+        toast.success("入站删除成功（后端正在重启Xray服务）");
+      } else {
+        toast.success("入站删除成功");
+      }
+      // 延迟刷新列表
+      setTimeout(() => fetchInbounds(), 1000);
     } catch (error) {
       console.error("Failed to delete inbound:", error);
       toast.error("删除入站失败");
+      // 即使失败也刷新（数据可能已删除）
+      setTimeout(() => fetchInbounds(), 1000);
     }
   };
 
-  const handleToggle = async (id: number, currentStatus: boolean) => {
+  // 修复 handleToggle - 必须发送完整的入站数据
+  const handleToggle = async (inbound: XrayInbound) => {
+    setToggling(inbound.id);
     try {
-      await xrayService.updateInbound(id, { enabled: !currentStatus });
-      toast.success(currentStatus ? "入站已停止" : "入站已启动");
-      fetchInbounds();
+      const currentEnabled = inbound.enable ?? inbound.enabled ?? true;
+      
+      // 解析现有的stream_settings和sniffing
+      let streamSettingsStr = inbound.stream_settings || '{"network":"tcp","security":"none"}';
+      let sniffingStr = inbound.sniffing || '{"enabled":true,"destOverride":["http","tls","quic"],"metadataOnly":false}';
+
+      // 后端 UpdateInbound 使用 CreateInboundRequest 结构体
+      // 必须发送所有 required 字段: remark, port, protocol
+      const result = await xrayService.updateInbound(inbound.id, {
+        remark: inbound.remark,
+        port: inbound.port,
+        protocol: inbound.protocol,
+        listen: inbound.listen || "0.0.0.0",
+        stream_settings: streamSettingsStr,
+        sniffing: sniffingStr,
+      });
+
+      if (result.timedOut) {
+        toast.success("入站配置已更新（后端正在重启Xray服务）");
+      } else {
+        toast.success("入站配置已更新");
+      }
+      // 延迟刷新列表
+      setTimeout(() => fetchInbounds(), 1000);
     } catch (error) {
       console.error("Failed to toggle inbound:", error);
       toast.error("操作失败");
+      // 即使失败也刷新
+      setTimeout(() => fetchInbounds(), 1000);
+    } finally {
+      setToggling(null);
     }
   };
 
@@ -334,7 +396,9 @@ export default function XrayManage() {
     // 解析StreamSettings
     if (inbound.stream_settings) {
       try {
-        const parsed = JSON.parse(inbound.stream_settings);
+        const parsed = typeof inbound.stream_settings === 'string' 
+          ? JSON.parse(inbound.stream_settings) 
+          : inbound.stream_settings;
         setStreamSettings({
           network: parsed.network || "tcp",
           security: parsed.security || "none",
@@ -349,14 +413,16 @@ export default function XrayManage() {
           tls_alpn: parsed.tlsSettings?.alpn?.join(",") || "h2,http/1.1",
         });
       } catch (e) {
-        console.error("Failed to parse stream settings:", e);
+        console.error("Failed to parse stream_settings:", e);
       }
     }
     
     // 解析Sniffing
     if (inbound.sniffing) {
       try {
-        const parsed = JSON.parse(inbound.sniffing);
+        const parsed = typeof inbound.sniffing === 'string'
+          ? JSON.parse(inbound.sniffing)
+          : inbound.sniffing;
         setSniffingEnabled(parsed.enabled || false);
       } catch (e) {
         console.error("Failed to parse sniffing:", e);
@@ -366,9 +432,198 @@ export default function XrayManage() {
     setEditDialogOpen(true);
   };
 
+  // 生成自签名证书
+  const handleGenerateSelfSigned = async () => {
+    if (!selfSignedForm.name || !selfSignedForm.domain) {
+      toast.error("请填写证书名称和域名");
+      return;
+    }
+    try {
+      await api.post('/api/v1/certificates/generate', selfSignedForm);
+      toast.success("自签名证书生成成功");
+      setSelfSignedDialogOpen(false);
+      setSelfSignedForm({ name: "", domain: "" });
+      await fetchCertificates();
+    } catch (error) {
+      console.error("Failed to generate self-signed cert:", error);
+      toast.error("生成自签名证书失败");
+    }
+  };
+
   const totalInbounds = inbounds.length;
-  const enabledCount = inbounds.filter((i) => i.enabled).length;
+  const enabledCount = inbounds.filter((i) => i.enable || i.enabled).length;
   const totalClients = inbounds.reduce((sum, i) => sum + (i.clients?.length || 0), 0);
+
+  // 渲染传输层配置表单（创建和编辑共用）
+  const renderTransportForm = () => (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label>传输协议</Label>
+        <Select
+          value={streamSettings.network}
+          onValueChange={(value) => setStreamSettings({ ...streamSettings, network: value })}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="tcp">TCP</SelectItem>
+            <SelectItem value="ws">WebSocket</SelectItem>
+            <SelectItem value="http">HTTP/2</SelectItem>
+            <SelectItem value="grpc">gRPC</SelectItem>
+            <SelectItem value="quic">QUIC</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {streamSettings.network === "tcp" && (
+        <div className="space-y-2">
+          <Label>TCP伪装类型</Label>
+          <Select
+            value={streamSettings.tcp_header_type}
+            onValueChange={(value) => setStreamSettings({ ...streamSettings, tcp_header_type: value })}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">无</SelectItem>
+              <SelectItem value="http">HTTP</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {streamSettings.network === "ws" && (
+        <>
+          <div className="space-y-2">
+            <Label>WebSocket路径</Label>
+            <Input
+              placeholder="/"
+              value={streamSettings.ws_path}
+              onChange={(e) => setStreamSettings({ ...streamSettings, ws_path: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Host (可选)</Label>
+            <Input
+              placeholder="example.com"
+              value={streamSettings.ws_host}
+              onChange={(e) => setStreamSettings({ ...streamSettings, ws_host: e.target.value })}
+            />
+          </div>
+        </>
+      )}
+
+      {streamSettings.network === "http" && (
+        <>
+          <div className="space-y-2">
+            <Label>HTTP路径</Label>
+            <Input
+              placeholder="/"
+              value={streamSettings.http_path}
+              onChange={(e) => setStreamSettings({ ...streamSettings, http_path: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Host</Label>
+            <Input
+              placeholder="example.com"
+              value={streamSettings.http_host}
+              onChange={(e) => setStreamSettings({ ...streamSettings, http_host: e.target.value })}
+            />
+          </div>
+        </>
+      )}
+
+      {streamSettings.network === "grpc" && (
+        <div className="space-y-2">
+          <Label>gRPC服务名</Label>
+          <Input
+            placeholder="GunService"
+            value={streamSettings.grpc_service_name}
+            onChange={(e) => setStreamSettings({ ...streamSettings, grpc_service_name: e.target.value })}
+          />
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <Label>安全传输</Label>
+        <Select
+          value={streamSettings.security}
+          onValueChange={(value) => setStreamSettings({ ...streamSettings, security: value })}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">无</SelectItem>
+            <SelectItem value="tls">TLS</SelectItem>
+            <SelectItem value="reality">Reality</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      {streamSettings.security === "tls" && (
+        <>
+          <div className="space-y-2">
+            <Label>选择证书</Label>
+            <Select
+              value={streamSettings.certificate_id}
+              onValueChange={(value) => setStreamSettings({ ...streamSettings, certificate_id: value })}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="选择已上传的证书" />
+              </SelectTrigger>
+              <SelectContent>
+                {certificates.length === 0 ? (
+                  <SelectItem value="none" disabled>暂无证书，请先在证书管理页面添加</SelectItem>
+                ) : (
+                  certificates.filter(c => c.status === 'active' || c.status === 'valid').map((cert) => (
+                    <SelectItem key={cert.id} value={cert.id.toString()}>
+                      {cert.name} ({cert.domain}) - {cert.cert_type === 'self_signed' ? '自签名' : '正式证书'}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+            <div className="flex gap-2 mt-2">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => setSelfSignedDialogOpen(true)}
+              >
+                快速生成自签名证书
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => window.location.href = '/certificates'}
+              >
+                前往证书管理
+              </Button>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Server Name (可选)</Label>
+            <Input
+              placeholder="自动使用证书域名"
+              value={streamSettings.tls_server_name}
+              onChange={(e) => setStreamSettings({ ...streamSettings, tls_server_name: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>ALPN</Label>
+            <Input
+              placeholder="h2,http/1.1"
+              value={streamSettings.tls_alpn}
+              onChange={(e) => setStreamSettings({ ...streamSettings, tls_alpn: e.target.value })}
+            />
+          </div>
+        </>
+      )}
+    </div>
+  );
 
   return (
     <DashboardLayout>
@@ -382,11 +637,11 @@ export default function XrayManage() {
             <p className="text-muted-foreground mt-1">管理 Xray 入站配置和客户端</p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={fetchInbounds}>
+            <Button variant="outline" onClick={() => { fetchInbounds(); fetchNodes(); }}>
               <RefreshCw className="w-4 h-4 mr-2" />
               刷新
             </Button>
-            <Button onClick={() => setCreateDialogOpen(true)}>
+            <Button onClick={() => { fetchNodes(); setCreateDialogOpen(true); }}>
               <Plus className="w-4 h-4 mr-2" />
               创建入站
             </Button>
@@ -394,7 +649,7 @@ export default function XrayManage() {
         </div>
 
         {/* 统计卡片 */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
           <Card className="p-6 bg-card/40 backdrop-blur-xl border-white/10">
             <div className="flex items-center justify-between">
               <div>
@@ -422,8 +677,20 @@ export default function XrayManage() {
           <Card className="p-6 bg-card/40 backdrop-blur-xl border-white/10">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground mb-1">总客户端</p>
-                <p className="text-3xl font-bold">{totalClients}</p>
+                <p className="text-sm text-muted-foreground mb-1">在线节点</p>
+                <p className="text-3xl font-bold">{nodes.length}</p>
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-orange-400 to-yellow-500 flex items-center justify-center">
+                <Shield className="w-6 h-6 text-white" />
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-6 bg-card/40 backdrop-blur-xl border-white/10">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-muted-foreground mb-1">证书数</p>
+                <p className="text-3xl font-bold">{certificates.length}</p>
               </div>
               <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center">
                 <Users className="w-6 h-6 text-white" />
@@ -440,7 +707,7 @@ export default function XrayManage() {
               <div className="text-center py-8 text-muted-foreground">加载中...</div>
             ) : inbounds.length === 0 ? (
               <div className="text-center py-8 text-muted-foreground">
-                暂无入站配置,点击"创建入站"开始
+                暂无入站配置，点击"创建入站"开始
               </div>
             ) : (
               <Table>
@@ -460,10 +727,14 @@ export default function XrayManage() {
                     let network = "tcp";
                     let security = "none";
                     try {
-                      const stream = JSON.parse(inbound.stream_settings || "{}");
+                      const stream = typeof inbound.stream_settings === 'string'
+                        ? JSON.parse(inbound.stream_settings || "{}")
+                        : (inbound.stream_settings || {});
                       network = stream.network || "tcp";
                       security = stream.security || "none";
                     } catch (e) {}
+                    
+                    const isEnabled = inbound.enable ?? inbound.enabled ?? true;
                     
                     return (
                       <TableRow
@@ -489,20 +760,25 @@ export default function XrayManage() {
                               <Shield className="h-3 w-3" />
                               TLS
                             </Badge>
+                          ) : security === "reality" ? (
+                            <Badge variant="outline" className="gap-1 border-purple-500/50 text-purple-400">
+                              <Shield className="h-3 w-3" />
+                              Reality
+                            </Badge>
                           ) : (
                             <Badge variant="secondary">无</Badge>
                           )}
                         </TableCell>
                         <TableCell>
                           <Badge
-                            variant={inbound.enabled ? "default" : "secondary"}
+                            variant={isEnabled ? "default" : "secondary"}
                             className={
-                              inbound.enabled
+                              isEnabled
                                 ? "bg-green-500/20 text-green-400 border-green-500/50"
                                 : "bg-gray-500/20 text-gray-400 border-gray-500/50"
                             }
                           >
-                            {inbound.enabled ? "运行中" : "已停止"}
+                            {isEnabled ? "运行中" : "已停止"}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
@@ -510,9 +786,13 @@ export default function XrayManage() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => handleToggle(inbound.id, inbound.enabled)}
+                              disabled={toggling === inbound.id}
+                              onClick={() => handleToggle(inbound)}
+                              title={isEnabled ? "暂停" : "启动"}
                             >
-                              {inbound.enabled ? (
+                              {toggling === inbound.id ? (
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                              ) : isEnabled ? (
                                 <Pause className="w-4 h-4" />
                               ) : (
                                 <Play className="w-4 h-4" />
@@ -522,6 +802,7 @@ export default function XrayManage() {
                               variant="ghost"
                               size="sm"
                               onClick={() => openEditDialog(inbound)}
+                              title="编辑"
                             >
                               <Edit className="w-4 h-4" />
                             </Button>
@@ -529,6 +810,7 @@ export default function XrayManage() {
                               variant="ghost"
                               size="sm"
                               onClick={() => handleDelete(inbound.id)}
+                              title="删除"
                             >
                               <Trash2 className="w-4 h-4" />
                             </Button>
@@ -578,17 +860,30 @@ export default function XrayManage() {
                     </SelectTrigger>
                     <SelectContent>
                       {nodes.length === 0 ? (
-                        <SelectItem value="none" disabled>暂无在线节点</SelectItem>
+                        <SelectItem value="none" disabled>
+                          暂无在线节点 (共{allNodes.length}个节点)
+                        </SelectItem>
                       ) : (
                         nodes.map((node) => (
                           <SelectItem key={node.id} value={String(node.id)}>
-                            {node.name} ({node.host}:{node.port})
+                            {node.name} ({node.host}:{node.port}) - {node.type}
                           </SelectItem>
                         ))
                       )}
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">入站将部署到选中的节点上</p>
+                  {nodes.length === 0 && allNodes.length > 0 && (
+                    <p className="text-xs text-yellow-400 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      有 {allNodes.length} 个节点但均不在线，请检查节点状态
+                    </p>
+                  )}
+                  {allNodes.length === 0 && (
+                    <p className="text-xs text-yellow-400 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      尚未添加任何节点，请先在节点管理页面添加节点
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="remark">备注</Label>
@@ -637,151 +932,8 @@ export default function XrayManage() {
                 </div>
               </TabsContent>
               
-              <TabsContent value="transport" className="space-y-4">
-                <div className="space-y-2">
-                  <Label>传输协议</Label>
-                  <Select
-                    value={streamSettings.network}
-                    onValueChange={(value) => setStreamSettings({ ...streamSettings, network: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="tcp">TCP</SelectItem>
-                      <SelectItem value="ws">WebSocket</SelectItem>
-                      <SelectItem value="http">HTTP/2</SelectItem>
-                      <SelectItem value="grpc">gRPC</SelectItem>
-                      <SelectItem value="quic">QUIC</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {streamSettings.network === "tcp" && (
-                  <div className="space-y-2">
-                    <Label>TCP伪装类型</Label>
-                    <Select
-                      value={streamSettings.tcp_header_type}
-                      onValueChange={(value) => setStreamSettings({ ...streamSettings, tcp_header_type: value })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">无</SelectItem>
-                        <SelectItem value="http">HTTP</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-
-                {streamSettings.network === "ws" && (
-                  <>
-                    <div className="space-y-2">
-                      <Label>WebSocket路径</Label>
-                      <Input
-                        placeholder="/"
-                        value={streamSettings.ws_path}
-                        onChange={(e) => setStreamSettings({ ...streamSettings, ws_path: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Host (可选)</Label>
-                      <Input
-                        placeholder="example.com"
-                        value={streamSettings.ws_host}
-                        onChange={(e) => setStreamSettings({ ...streamSettings, ws_host: e.target.value })}
-                      />
-                    </div>
-                  </>
-                )}
-
-                {streamSettings.network === "http" && (
-                  <>
-                    <div className="space-y-2">
-                      <Label>HTTP路径</Label>
-                      <Input
-                        placeholder="/"
-                        value={streamSettings.http_path}
-                        onChange={(e) => setStreamSettings({ ...streamSettings, http_path: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Host</Label>
-                      <Input
-                        placeholder="example.com"
-                        value={streamSettings.http_host}
-                        onChange={(e) => setStreamSettings({ ...streamSettings, http_host: e.target.value })}
-                      />
-                    </div>
-                  </>
-                )}
-
-                {streamSettings.network === "grpc" && (
-                  <div className="space-y-2">
-                    <Label>gRPC服务名</Label>
-                    <Input
-                      placeholder="GunService"
-                      value={streamSettings.grpc_service_name}
-                      onChange={(e) => setStreamSettings({ ...streamSettings, grpc_service_name: e.target.value })}
-                    />
-                  </div>
-                )}
-
-                <div className="space-y-2">
-                  <Label>安全传输</Label>
-                  <Select
-                    value={streamSettings.security}
-                    onValueChange={(value) => setStreamSettings({ ...streamSettings, security: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">无</SelectItem>
-                      <SelectItem value="tls">TLS</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {streamSettings.security === "tls" && (
-                  <>
-                    <div className="space-y-2">
-                      <Label>选择证书</Label>
-                      <Select
-                        value={streamSettings.certificate_id}
-                        onValueChange={(value) => setStreamSettings({ ...streamSettings, certificate_id: value })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="选择已上传的证书" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {certificates.filter(c => c.status === 'active').map((cert) => (
-                            <SelectItem key={cert.id} value={cert.id.toString()}>
-                              {cert.name} ({cert.domain})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Server Name (可选)</Label>
-                      <Input
-                        placeholder="自动使用证书域名"
-                        value={streamSettings.tls_server_name}
-                        onChange={(e) => setStreamSettings({ ...streamSettings, tls_server_name: e.target.value })}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>ALPN</Label>
-                      <Input
-                        placeholder="h2,http/1.1"
-                        value={streamSettings.tls_alpn}
-                        onChange={(e) => setStreamSettings({ ...streamSettings, tls_alpn: e.target.value })}
-                      />
-                    </div>
-                  </>
-                )}
+              <TabsContent value="transport">
+                {renderTransportForm()}
               </TabsContent>
               
               <TabsContent value="advanced" className="space-y-4">
@@ -812,13 +964,13 @@ export default function XrayManage() {
           </DialogContent>
         </Dialog>
 
-        {/* Edit Dialog - Similar structure to Create Dialog */}
+        {/* Edit Dialog */}
         <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
           <DialogContent className="bg-card/95 backdrop-blur-xl border-white/10 max-w-3xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>编辑入站</DialogTitle>
               <DialogDescription>
-                修改入站配置
+                修改入站配置 - {selectedInbound?.remark}
               </DialogDescription>
             </DialogHeader>
             
@@ -839,6 +991,23 @@ export default function XrayManage() {
                   />
                 </div>
                 <div className="space-y-2">
+                  <Label htmlFor="edit-protocol">协议</Label>
+                  <Select
+                    value={formData.protocol}
+                    onValueChange={(value) => setFormData({ ...formData, protocol: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="vmess">VMess</SelectItem>
+                      <SelectItem value="vless">VLESS</SelectItem>
+                      <SelectItem value="trojan">Trojan</SelectItem>
+                      <SelectItem value="shadowsocks">Shadowsocks</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="edit-port">端口</Label>
                   <Input
                     id="edit-port"
@@ -857,62 +1026,8 @@ export default function XrayManage() {
                 </div>
               </TabsContent>
               
-              <TabsContent value="transport" className="space-y-4">
-                {/* Same transport configuration as Create Dialog */}
-                <div className="space-y-2">
-                  <Label>传输协议</Label>
-                  <Select
-                    value={streamSettings.network}
-                    onValueChange={(value) => setStreamSettings({ ...streamSettings, network: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="tcp">TCP</SelectItem>
-                      <SelectItem value="ws">WebSocket</SelectItem>
-                      <SelectItem value="http">HTTP/2</SelectItem>
-                      <SelectItem value="grpc">gRPC</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>安全传输</Label>
-                  <Select
-                    value={streamSettings.security}
-                    onValueChange={(value) => setStreamSettings({ ...streamSettings, security: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">无</SelectItem>
-                      <SelectItem value="tls">TLS</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {streamSettings.security === "tls" && (
-                  <div className="space-y-2">
-                    <Label>选择证书</Label>
-                    <Select
-                      value={streamSettings.certificate_id}
-                      onValueChange={(value) => setStreamSettings({ ...streamSettings, certificate_id: value })}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="选择已上传的证书" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {certificates.filter(c => c.status === 'active').map((cert) => (
-                          <SelectItem key={cert.id} value={cert.id.toString()}>
-                            {cert.name} ({cert.domain})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
+              <TabsContent value="transport">
+                {renderTransportForm()}
               </TabsContent>
               
               <TabsContent value="advanced" className="space-y-4">
@@ -939,6 +1054,42 @@ export default function XrayManage() {
                 取消
               </Button>
               <Button onClick={handleEdit}>保存</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* 自签名证书生成对话框 */}
+        <Dialog open={selfSignedDialogOpen} onOpenChange={setSelfSignedDialogOpen}>
+          <DialogContent className="bg-card/95 backdrop-blur-xl border-white/10">
+            <DialogHeader>
+              <DialogTitle>生成自签名证书</DialogTitle>
+              <DialogDescription>
+                快速生成一个自签名TLS证书，适用于测试环境
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>证书名称</Label>
+                <Input
+                  placeholder="例如: 测试证书"
+                  value={selfSignedForm.name}
+                  onChange={(e) => setSelfSignedForm({ ...selfSignedForm, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>域名</Label>
+                <Input
+                  placeholder="例如: example.com"
+                  value={selfSignedForm.domain}
+                  onChange={(e) => setSelfSignedForm({ ...selfSignedForm, domain: e.target.value })}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setSelfSignedDialogOpen(false)}>
+                取消
+              </Button>
+              <Button onClick={handleGenerateSelfSigned}>生成</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

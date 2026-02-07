@@ -19,37 +19,38 @@ export interface SubscriptionLink {
 export const subscriptionService = {
   // 生成订阅
   generate: async (userId: number, format: string) => {
-    const response = await apiClient.get("/subscription/generate", {
+    const response: any = await apiClient.get("/api/v1/subscription/generate", {
       params: { user_id: userId, format },
     });
-    return response.data.data;
+    return response?.data || response;
   },
 
   // 获取订阅链接
   getLink: async (userId: number, format: string) => {
-    const response = await apiClient.get("/subscription/link", {
+    const response: any = await apiClient.get("/api/v1/subscription/link", {
       params: { user_id: userId, format },
     });
-    return response.data.data as SubscriptionLink;
+    return (response?.data || response) as SubscriptionLink;
   },
 
   // 获取订阅列表
   list: async (userId?: number) => {
-    const response = await apiClient.get("/subscription/list", {
+    const response: any = await apiClient.get("/api/v1/subscription/list", {
       params: userId ? { user_id: userId } : {},
     });
-    return response.data.data as Subscription[];
+    const data = response?.data || response;
+    return Array.isArray(data) ? data : (data?.subscriptions || []) as Subscription[];
   },
 
   // 切换订阅状态
   toggle: async (id: number) => {
-    const response = await apiClient.post(`/subscription/${id}/toggle`);
-    return response.data;
+    const response: any = await apiClient.post(`/api/v1/subscription/${id}/toggle`);
+    return response;
   },
 
   // 删除订阅
   delete: async (id: number) => {
-    const response = await apiClient.delete(`/subscription/${id}`);
-    return response.data;
+    const response: any = await apiClient.delete(`/api/v1/subscription/${id}`);
+    return response;
   },
 };

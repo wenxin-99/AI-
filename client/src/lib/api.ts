@@ -7,7 +7,7 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || "";
 // 创建 axios 实例
 const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 30000,
+  timeout: 60000,
   headers: {
     "Content-Type": "application/json",
   },
@@ -33,9 +33,10 @@ api.interceptors.response.use(
     return response.data;
   },
   (error: AxiosError<any>) => {
-    // 处理网络错误
+    // 处理网络错误和超时
     if (!error.response) {
-      toast.error("网络连接失败,请检查网络设置");
+      // 不在这里显示 toast，让调用方决定如何处理
+      // （因为后端 Restart 导致的超时并不是真正的错误）
       return Promise.reject(error);
     }
 
