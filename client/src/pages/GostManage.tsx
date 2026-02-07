@@ -31,6 +31,7 @@ import {
 import { Plus, Play, Pause, Edit, Trash2, GitBranch, RefreshCw, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { gostService, GostTunnel } from "@/services/gost";
+import { nodeService, type Node } from "@/services/node";
 import { Switch } from "@/components/ui/switch";
 import api from "@/lib/api";
 import LogViewer from "@/components/LogViewer";
@@ -45,10 +46,12 @@ interface Certificate {
 export default function GostManage() {
   const [tunnels, setTunnels] = useState<GostTunnel[]>([]);
   const [certificates, setCertificates] = useState<Certificate[]>([]);
+  const [nodes, setNodes] = useState<Node[]>([]);
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [selectedTunnel, setSelectedTunnel] = useState<GostTunnel | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string>("");
 
   // 表单状态
   const [formData, setFormData] = useState({
@@ -69,7 +72,20 @@ export default function GostManage() {
   useEffect(() => {
     fetchTunnels();
     fetchCertificates();
+    fetchNodes();
   }, []);
+
+  const fetchNodes = async () => {
+    try {
+      const response = await nodeService.getAll();
+      const nodeList = response.data || [];
+      // 只显示在线节点
+      setNodes(nodeList.filter((node: Node) => node.status === 'online'));
+    } catch (error) {
+      console.error('Failed to fetch nodes:', error);
+      toast.error('获取节点列表失败');
+    }
+  };
 
   const fetchCertificates = async () => {
     try {
@@ -95,6 +111,12 @@ export default function GostManage() {
   };
 
   const handleCreate = async () => {
+    // 节点选择验证
+    if (!selectedNodeId) {
+      toast.error("请选择一个节点");
+      return;
+    }
+
     // 基本验证
     if (!formData.name || !formData.local_port || !formData.remote_addr) {
       toast.error("请填写完整信息");
@@ -440,6 +462,29 @@ export default function GostManage() {
               </DialogDescription>
             </DialogHeader>
             <div className="grid grid-cols-2 gap-4 py-4">
+              <div className="space-y-2 col-span-2">
+                <Label htmlFor="node">选择节点</Label>
+                <Select
+                  value={selectedNodeId}
+                  onValueChange={(value) => setSelectedNodeId(value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择一个在线节点" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {nodes.length === 0 ? (
+                      <SelectItem value="none" disabled>暂无在线节点</SelectItem>
+                    ) : (
+                      nodes.map((node) => (
+                        <SelectItem key={node.id} value={String(node.id)}>
+                          {node.name} ({node.host}:{node.port})
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">隧道将部署到选中的节点上</p>
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="name">名称</Label>
                 <Input

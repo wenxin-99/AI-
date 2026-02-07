@@ -33,6 +33,7 @@ import { Switch } from "@/components/ui/switch";
 import { Plus, Play, Pause, Edit, Trash2, Users, RefreshCw, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { xrayService, XrayInbound } from "@/services/xray";
+import { nodeService, type Node } from "@/services/node";
 import api from "@/lib/api";
 import LogViewer from "@/components/LogViewer";
 
@@ -46,10 +47,12 @@ interface Certificate {
 export default function XrayManage() {
   const [inbounds, setInbounds] = useState<XrayInbound[]>([]);
   const [certificates, setCertificates] = useState<Certificate[]>([]);
+  const [nodes, setNodes] = useState<Node[]>([]);
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [selectedInbound, setSelectedInbound] = useState<XrayInbound | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string>("");
   
   // 基础表单状态
   const [formData, setFormData] = useState({
@@ -85,7 +88,20 @@ export default function XrayManage() {
   useEffect(() => {
     fetchInbounds();
     fetchCertificates();
+    fetchNodes();
   }, []);
+
+  const fetchNodes = async () => {
+    try {
+      const response = await nodeService.getAll();
+      const nodeList = response.data || [];
+      // 只显示在线节点
+      setNodes(nodeList.filter((node: Node) => node.status === 'online'));
+    } catch (error) {
+      console.error('Failed to fetch nodes:', error);
+      toast.error('获取节点列表失败');
+    }
+  };
 
   const fetchInbounds = async () => {
     try {
@@ -111,6 +127,12 @@ export default function XrayManage() {
   };
 
   const handleCreate = async () => {
+    // 节点选择验证
+    if (!selectedNodeId) {
+      toast.error("请选择一个节点");
+      return;
+    }
+
     // 基本验证
     if (!formData.remark || !formData.port) {
       toast.error("请填写完整信息");
@@ -545,6 +567,29 @@ export default function XrayManage() {
               </TabsList>
               
               <TabsContent value="basic" className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="node">选择节点</Label>
+                  <Select
+                    value={selectedNodeId}
+                    onValueChange={(value) => setSelectedNodeId(value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择一个在线节点" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {nodes.length === 0 ? (
+                        <SelectItem value="none" disabled>暂无在线节点</SelectItem>
+                      ) : (
+                        nodes.map((node) => (
+                          <SelectItem key={node.id} value={String(node.id)}>
+                            {node.name} ({node.host}:{node.port})
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">入站将部署到选中的节点上</p>
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="remark">备注</Label>
                   <Input
