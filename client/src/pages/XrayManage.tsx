@@ -85,6 +85,13 @@ export default function XrayManage() {
     // TLS配置
     tls_server_name: "",
     tls_alpn: "h2,http/1.1",
+    // Reality配置
+    reality_dest: "www.microsoft.com:443",
+    reality_server_names: "www.microsoft.com",
+    reality_private_key: "",
+    reality_public_key: "",
+    reality_short_ids: "",
+    reality_fingerprint: "chrome",
   });
 
   // Sniffing配置
@@ -270,6 +277,26 @@ export default function XrayManage() {
       };
     }
 
+    // Reality配置
+    if (streamSettings.security === "reality") {
+      const shortIds = streamSettings.reality_short_ids
+        ? streamSettings.reality_short_ids.split(",").map(s => s.trim())
+        : [""];
+      const serverNames = streamSettings.reality_server_names
+        ? streamSettings.reality_server_names.split(",").map(s => s.trim())
+        : ["www.microsoft.com"];
+      
+      settings.realitySettings = {
+        show: false,
+        dest: streamSettings.reality_dest || "www.microsoft.com:443",
+        xver: 0,
+        serverNames: serverNames,
+        privateKey: streamSettings.reality_private_key,
+        shortIds: shortIds,
+        fingerprint: streamSettings.reality_fingerprint || "chrome",
+      };
+    }
+
     return JSON.stringify(settings);
   };
 
@@ -287,6 +314,12 @@ export default function XrayManage() {
       grpc_service_name: "",
       tls_server_name: "",
       tls_alpn: "h2,http/1.1",
+      reality_dest: "www.microsoft.com:443",
+      reality_server_names: "www.microsoft.com",
+      reality_private_key: "",
+      reality_public_key: "",
+      reality_short_ids: "",
+      reality_fingerprint: "chrome",
     });
     setSniffingEnabled(true);
     setSelectedNodeId("");
@@ -696,6 +729,71 @@ export default function XrayManage() {
               value={streamSettings.tls_alpn}
               onChange={(e) => setStreamSettings({ ...streamSettings, tls_alpn: e.target.value })}
             />
+          </div>
+        </>
+      )}
+
+      {streamSettings.security === "reality" && (
+        <>
+          <div className="space-y-2">
+            <Label>目标地址 (Dest)</Label>
+            <Input
+              placeholder="www.microsoft.com:443"
+              value={streamSettings.reality_dest}
+              onChange={(e) => setStreamSettings({ ...streamSettings, reality_dest: e.target.value })}
+            />
+            <p className="text-xs text-muted-foreground">伪装目标网站，建议使用大型网站如 microsoft.com</p>
+          </div>
+          <div className="space-y-2">
+            <Label>服务器名 (Server Names)</Label>
+            <Input
+              placeholder="www.microsoft.com"
+              value={streamSettings.reality_server_names}
+              onChange={(e) => setStreamSettings({ ...streamSettings, reality_server_names: e.target.value })}
+            />
+            <p className="text-xs text-muted-foreground">多个域名用逗号分隔</p>
+          </div>
+          <div className="space-y-2">
+            <Label>私钥 (Private Key)</Label>
+            <Input
+              placeholder="服务端私钥"
+              value={streamSettings.reality_private_key}
+              onChange={(e) => setStreamSettings({ ...streamSettings, reality_private_key: e.target.value })}
+            />
+            <p className="text-xs text-muted-foreground">使用 xray x25519 命令生成密钥对</p>
+          </div>
+          <div className="space-y-2">
+            <Label>公钥 (Public Key)</Label>
+            <Input
+              placeholder="客户端公钥"
+              value={streamSettings.reality_public_key}
+              onChange={(e) => setStreamSettings({ ...streamSettings, reality_public_key: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>短 ID (Short IDs)</Label>
+            <Input
+              placeholder="留空或 0-16位十六进制，多个用逗号分隔"
+              value={streamSettings.reality_short_ids}
+              onChange={(e) => setStreamSettings({ ...streamSettings, reality_short_ids: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>浏览器指纹 (Fingerprint)</Label>
+            <Select
+              value={streamSettings.reality_fingerprint}
+              onValueChange={(value) => setStreamSettings({ ...streamSettings, reality_fingerprint: value })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="chrome">Chrome</SelectItem>
+                <SelectItem value="firefox">Firefox</SelectItem>
+                <SelectItem value="safari">Safari</SelectItem>
+                <SelectItem value="edge">Edge</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </>
       )}

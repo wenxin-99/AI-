@@ -91,6 +91,17 @@ export function generateShareLink(inbound: XrayInbound, node: Node | undefined):
         if (security === "tls") {
           if (streamSettings.tls_server_name) params.set("sni", streamSettings.tls_server_name);
           if (streamSettings.tls_alpn) params.set("alpn", streamSettings.tls_alpn);
+        } else if (security === "reality") {
+          const realitySettings = streamSettings.realitySettings || {};
+          if (realitySettings.publicKey) params.set("pbk", realitySettings.publicKey);
+          if (realitySettings.fingerprint) params.set("fp", realitySettings.fingerprint);
+          if (realitySettings.serverNames && realitySettings.serverNames.length > 0) {
+            params.set("sni", realitySettings.serverNames[0]);
+          }
+          if (realitySettings.shortIds && realitySettings.shortIds.length > 0) {
+            params.set("sid", realitySettings.shortIds[0]);
+          }
+          if (realitySettings.spiderX) params.set("spx", realitySettings.spiderX);
         }
 
         const remark = encodeURIComponent(inbound.remark || `${node.name}-${inbound.port}`);
@@ -115,6 +126,17 @@ export function generateShareLink(inbound: XrayInbound, node: Node | undefined):
         if (security === "tls") {
           if (streamSettings.tls_server_name) params.set("sni", streamSettings.tls_server_name);
           if (streamSettings.tls_alpn) params.set("alpn", streamSettings.tls_alpn);
+        } else if (security === "reality") {
+          const realitySettings = streamSettings.realitySettings || {};
+          if (realitySettings.publicKey) params.set("pbk", realitySettings.publicKey);
+          if (realitySettings.fingerprint) params.set("fp", realitySettings.fingerprint);
+          if (realitySettings.serverNames && realitySettings.serverNames.length > 0) {
+            params.set("sni", realitySettings.serverNames[0]);
+          }
+          if (realitySettings.shortIds && realitySettings.shortIds.length > 0) {
+            params.set("sid", realitySettings.shortIds[0]);
+          }
+          if (realitySettings.spiderX) params.set("spx", realitySettings.spiderX);
         }
 
         const remark = encodeURIComponent(inbound.remark || `${node.name}-${inbound.port}`);
