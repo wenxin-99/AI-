@@ -287,17 +287,31 @@ build_frontend() {
     mkdir -p /var/www/uniproxy-panel
     
     # 根据实际构建输出目录复制文件
-    if [ -d "dist/public" ]; then
+    if [ -d "dist/public" ] && [ -f "dist/public/index.html" ]; then
+        log_info "从 dist/public 复制文件..."
         cp -r dist/public/* /var/www/uniproxy-panel/ || error_exit "前端部署失败"
-    elif [ -d "dist" ]; then
+    elif [ -d "dist" ] && [ -f "dist/index.html" ]; then
+        log_info "从 dist 复制文件..."
         cp -r dist/* /var/www/uniproxy-panel/ || error_exit "前端部署失败"
     else
-        error_exit "找不到构建产物目录"
+        log_error "构建目录结构:"
+        ls -la dist/ || true
+        ls -la dist/public/ 2>/dev/null || true
+        error_exit "找不到 index.html 文件"
+    fi
+    
+    # 验证文件是否复制成功
+    if [ ! -f "/var/www/uniproxy-panel/index.html" ]; then
+        log_error "前端文件列表:"
+        ls -la /var/www/uniproxy-panel/
+        error_exit "index.html 文件未成功复制"
     fi
     
     # 设置正确的文件权限
     chown -R www-data:www-data /var/www/uniproxy-panel
     chmod -R 755 /var/www/uniproxy-panel
+    
+    log_info "index.html 大小: $(du -h /var/www/uniproxy-panel/index.html | cut -f1)"
     
     log_info "前端构建完成"
 }
