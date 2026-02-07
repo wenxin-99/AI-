@@ -153,10 +153,8 @@ clone_project() {
         mv $INSTALL_DIR ${INSTALL_DIR}.bak.$(date +%s)
     fi
     
-    git clone https://github.com/wenxin-99/AI-.git $INSTALL_DIR/frontend
-    
-    # 如果有后端仓库,也克隆
-    # git clone YOUR_BACKEND_REPO $INSTALL_DIR/backend
+    # 克隆代码(包含前端和后端)
+    git clone https://github.com/wenxin-99/AI-.git $INSTALL_DIR
     
     log_info "项目代码克隆完成"
 }
@@ -165,7 +163,7 @@ clone_project() {
 build_frontend() {
     log_step "构建前端..."
     
-    cd /opt/uniproxy-panel/frontend
+    cd /opt/uniproxy-panel
     pnpm install
     pnpm build
     
@@ -181,14 +179,17 @@ build_frontend() {
 build_backend() {
     log_step "构建后端..."
     
-    # 如果后端代码在其他位置,需要先克隆
     if [[ ! -d "/opt/uniproxy-panel/backend" ]]; then
-        log_warn "后端代码不存在,跳过后端构建"
-        log_warn "请手动将后端代码放置到 /opt/uniproxy-panel/backend"
-        return
+        log_error "后端代码不存在"
+        exit 1
     fi
     
     cd /opt/uniproxy-panel/backend
+    
+    # 下载依赖
+    go mod download
+    
+    # 构建
     go build -o uniproxy ./cmd/main.go
     
     log_info "后端构建完成"
