@@ -33,6 +33,7 @@ import { toast } from "sonner";
 import { gostService, GostTunnel } from "@/services/gost";
 import { Switch } from "@/components/ui/switch";
 import api from "@/lib/api";
+import LogViewer from "@/components/LogViewer";
 
 interface Certificate {
   id: number;
@@ -326,6 +327,12 @@ export default function GostManage() {
             </div>
           </Card>
         </div>
+
+        {/* 日志查看器 */}
+        <LogViewer 
+          title="Gost 实时日志" 
+          logEndpoint="/api/v1/gost/logs" 
+        />
 
         {/* Tunnels Table */}
         <Card className="bg-card/40 backdrop-blur-xl border-white/10">

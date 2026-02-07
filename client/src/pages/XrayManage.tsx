@@ -34,6 +34,7 @@ import { Plus, Play, Pause, Edit, Trash2, Users, RefreshCw, Shield } from "lucid
 import { toast } from "sonner";
 import { xrayService, XrayInbound } from "@/services/xray";
 import api from "@/lib/api";
+import LogViewer from "@/components/LogViewer";
 
 interface Certificate {
   id: number;
@@ -408,6 +409,12 @@ export default function XrayManage() {
             </div>
           </Card>
         </div>
+
+        {/* 日志查看器 */}
+        <LogViewer 
+          title="Xray 实时日志" 
+          logEndpoint="/api/v1/xray/logs" 
+        />
 
         {/* Inbounds Table */}
         <Card className="bg-card/40 backdrop-blur-xl border-white/10">
