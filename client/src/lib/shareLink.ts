@@ -5,8 +5,8 @@ import type { Node } from "@/services/node";
  * 生成Xray入站的分享链接
  */
 export function generateShareLink(inbound: XrayInbound, node: Node | undefined): string {
-  if (!node) {
-    console.error("generateShareLink: node is undefined");
+  if (!node || !node.id || node.id === 0) {
+    console.error("generateShareLink: invalid node", node);
     return "";
   }
 
@@ -45,6 +45,10 @@ export function generateShareLink(inbound: XrayInbound, node: Node | undefined):
       }
     }
 
+    console.log('Protocol:', protocol);
+    console.log('Settings object:', settings);
+    console.log('Stream settings object:', streamSettings);
+
     switch (protocol) {
       case "vmess": {
         const vmessConfig = {
@@ -69,6 +73,7 @@ export function generateShareLink(inbound: XrayInbound, node: Node | undefined):
 
       case "vless": {
         const uuid = settings.uuid || settings.id || "00000000-0000-0000-0000-000000000000";
+        console.log('VLESS UUID:', uuid);
         const params = new URLSearchParams();
         params.set("type", network);
         params.set("security", security);
@@ -89,7 +94,9 @@ export function generateShareLink(inbound: XrayInbound, node: Node | undefined):
         }
 
         const remark = encodeURIComponent(inbound.remark || `${node.name}-${inbound.port}`);
-        return `vless://${uuid}@${address}:${port}?${params.toString()}#${remark}`;
+        const link = `vless://${uuid}@${address}:${port}?${params.toString()}#${remark}`;
+        console.log('Generated VLESS link:', link);
+        return link;
       }
 
       case "trojan": {
@@ -128,6 +135,7 @@ export function generateShareLink(inbound: XrayInbound, node: Node | undefined):
     }
   } catch (error) {
     console.error("Failed to generate share link:", error);
+    console.error("Error stack:", error instanceof Error ? error.stack : 'No stack');
     return "";
   }
 }

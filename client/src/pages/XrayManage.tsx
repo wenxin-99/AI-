@@ -1,5 +1,5 @@
 import DashboardLayout from "@/components/DashboardLayout";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -511,8 +511,12 @@ export default function XrayManage() {
   const handleCopyShareLink = async () => {
     if (!selectedShareInbound) return;
     
-    // 尝试通过node_id匹配，如果失败则使用listen地址匹配
-    let node = allNodes.find(n => n.id.toString() === selectedShareInbound.node_id?.toString());
+    // 尝试通过node_id匹配（仅当node_id > 0时）
+    let node = selectedShareInbound.node_id && selectedShareInbound.node_id > 0
+      ? allNodes.find(n => n.id === selectedShareInbound.node_id)
+      : undefined;
+    
+    // 如果没有找到，尝试使用listen地址匹配
     if (!node && selectedShareInbound.listen) {
       node = allNodes.find(n => n.host === selectedShareInbound.listen);
       console.log('Using listen address fallback:', selectedShareInbound.listen, 'found node:', node);
@@ -1204,13 +1208,20 @@ export default function XrayManage() {
                 <div className="flex gap-2">
                   <Input
                     readOnly
-                    value={selectedShareInbound ? (() => {
-                      let node = allNodes.find(n => n.id.toString() === selectedShareInbound.node_id?.toString());
+                    value={useMemo(() => {
+                      if (!selectedShareInbound) return "";
+                      
+                      // 尝试通过node_id匹配（仅当node_id > 0时）
+                      let node = selectedShareInbound.node_id && selectedShareInbound.node_id > 0
+                        ? allNodes.find(n => n.id === selectedShareInbound.node_id)
+                        : undefined;
+                      
+                      // 如果没有找到，尝试使用listen地址匹配
                       if (!node && selectedShareInbound.listen) {
                         node = allNodes.find(n => n.host === selectedShareInbound.listen);
                       }
                       return generateShareLink(selectedShareInbound, node);
-                    })() : ""}
+                    }, [selectedShareInbound, allNodes])}
                     className="font-mono text-sm"
                   />
                   <Button onClick={handleCopyShareLink} size="icon">
