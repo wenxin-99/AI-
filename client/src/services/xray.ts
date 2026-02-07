@@ -57,10 +57,10 @@ export interface XrayStats {
 export const xrayService = {
   // 获取所有入站
   getInbounds: async (): Promise<XrayInbound[]> => {
-    const response = await api.get<any, ApiResponse<XrayInbound[]>>(
+    const response = await api.get<any, any>(
       "/api/v1/xray/inbounds"
     );
-    return response.data;
+    return response.data?.inbounds || [];
   },
 
   // 获取单个入站
