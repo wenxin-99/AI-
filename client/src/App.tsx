@@ -16,6 +16,7 @@ import NodeManage from "./pages/NodeManage";
 import BBROptimize from "./pages/BBROptimize";
 import Certificates from "./pages/Certificates";
 import Settings from "./pages/Settings";
+import UserManage from "./pages/UserManage";
 
 
 function Router() {
@@ -32,6 +33,7 @@ function Router() {
       <Route path={"/nodes"} component={NodeManage} />
       <Route path={"/bbr"} component={BBROptimize} />
       <Route path={"/certificates"} component={Certificates} />
+      <Route path={"/users"} component={UserManage} />
       <Route path={"/settings"} component={Settings} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
