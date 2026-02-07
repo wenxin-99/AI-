@@ -465,10 +465,28 @@ export default function NodeManage() {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => {
+                  onClick={async () => {
                     const script = `PANEL_URL=${window.location.origin} API_TOKEN=your-token bash <(curl -fsSL ${window.location.origin}/node-install.sh)`;
-                    navigator.clipboard.writeText(script);
-                    toast.success('已复制到剪贴板');
+                    try {
+                      // 尝试使用Clipboard API
+                      await navigator.clipboard.writeText(script);
+                      toast.success('已复制到剪贴板');
+                    } catch (err) {
+                      // Fallback: 使用传统方法
+                      const textarea = document.createElement('textarea');
+                      textarea.value = script;
+                      textarea.style.position = 'fixed';
+                      textarea.style.opacity = '0';
+                      document.body.appendChild(textarea);
+                      textarea.select();
+                      try {
+                        document.execCommand('copy');
+                        toast.success('已复制到剪贴板');
+                      } catch (e) {
+                        toast.error('复制失败,请手动复制');
+                      }
+                      document.body.removeChild(textarea);
+                    }
                   }}
                   className="border-white/20 hover:bg-cyan-500/20"
                 >
