@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { authService } from "@/services/auth";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,20 +25,13 @@ export default function Login() {
     setLoading(true);
     
     try {
-      // TODO: Replace with actual API call
-      // Simulating API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Mock successful login
-      if (username === "admin" && password === "admin") {
-        localStorage.setItem("token", "mock-jwt-token");
-        toast.success("登录成功!");
-        setLocation("/dashboard");
-      } else {
-        toast.error("用户名或密码错误");
-      }
-    } catch (error) {
-      toast.error("登录失败,请稍后重试");
+      const response = await authService.login({ username, password });
+      localStorage.setItem("token", response.token);
+      toast.success("登录成功!");
+      setLocation("/dashboard");
+    } catch (error: any) {
+      // 错误已在 API 拦截器中处理
+      console.error("Login error:", error);
     } finally {
       setLoading(false);
     }
