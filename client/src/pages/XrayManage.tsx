@@ -90,7 +90,7 @@ export default function XrayManage() {
     try {
       setLoading(true);
       const data = await xrayService.getInbounds();
-      setInbounds(data);
+      setInbounds(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Failed to fetch inbounds:", error);
       toast.error("获取入站列表失败");
@@ -102,7 +102,8 @@ export default function XrayManage() {
   const fetchCertificates = async () => {
     try {
       const response = await api.get('/certificates');
-      setCertificates(response.data.certificates || []);
+      const certs = response?.data?.certificates || response?.data || [];
+      setCertificates(Array.isArray(certs) ? certs : []);
     } catch (error) {
       console.error("Failed to fetch certificates:", error);
     }

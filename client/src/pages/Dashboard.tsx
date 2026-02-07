@@ -45,7 +45,7 @@ export default function Dashboard() {
         trafficService.getTrafficTrend(7),
       ]);
       setSystemStats(sysTraffic);
-      setTrafficTrend(trend);
+      setTrafficTrend(Array.isArray(trend) ? trend : []);
     } catch (error) {
       console.error("Failed to fetch dashboard data:", error);
       // 使用模拟数据作为后备

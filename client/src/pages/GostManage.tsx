@@ -73,7 +73,8 @@ export default function GostManage() {
   const fetchCertificates = async () => {
     try {
       const response = await api.get('/certificates');
-      setCertificates(response.data.certificates || []);
+      const certs = response?.data?.certificates || response?.data || [];
+      setCertificates(Array.isArray(certs) ? certs : []);
     } catch (error) {
       console.error("Failed to fetch certificates:", error);
     }
@@ -83,7 +84,7 @@ export default function GostManage() {
     try {
       setLoading(true);
       const data = await gostService.getTunnels();
-      setTunnels(data);
+      setTunnels(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Failed to fetch tunnels:", error);
       toast.error("获取隧道列表失败");
