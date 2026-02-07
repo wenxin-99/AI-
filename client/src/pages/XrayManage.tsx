@@ -30,7 +30,8 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Play, Pause, Edit, Trash2, Users, RefreshCw, Shield, AlertCircle, Copy, QrCode } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import { Plus, Play, Pause, Edit, Trash2, Users, RefreshCw, Shield, AlertCircle, Copy, QrCode, Key, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
 import { xrayService, type XrayInbound } from "@/services/xray";
 import { nodeService, type Node } from "@/services/node";
@@ -45,6 +46,34 @@ interface Certificate {
   domain: string;
   status: string;
   cert_type: string;
+}
+
+// ============ 协议默认设置 ============
+const FINGERPRINTS = [
+  "chrome", "firefox", "safari", "ios", "android", "edge", "360", "qq", "random", "randomized"
+];
+
+const SS_METHODS = [
+  "aes-128-gcm", "aes-256-gcm", "chacha20-poly1305",
+  "2022-blake3-aes-128-gcm", "2022-blake3-aes-256-gcm", "2022-blake3-chacha20-poly1305",
+];
+
+function generateUUID(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+function generateShortId(): string {
+  const chars = '0123456789abcdef';
+  let result = '';
+  const len = [2, 4, 8, 16][Math.floor(Math.random() * 4)];
+  for (let i = 0; i < len; i++) {
+    result += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return result;
 }
 
 export default function XrayManage() {
@@ -63,17 +92,34 @@ export default function XrayManage() {
   const [formData, setFormData] = useState({
     remark: "",
     port: "",
-    protocol: "vmess",
+    protocol: "vless",
     listen: "0.0.0.0",
+  });
+
+  // 协议设置
+  const [protocolSettings, setProtocolSettings] = useState({
+    // VLESS/VMess
+    uuid: generateUUID(),
+    flow: "", // xtls-rprx-vision
+    // VMess
+    alterId: "0",
+    vmessSecurity: "auto",
+    // Trojan
+    trojanPassword: generateUUID(),
+    // Shadowsocks
+    ssMethod: "aes-256-gcm",
+    ssPassword: generateUUID(),
   });
 
   // 传输层配置
   const [streamSettings, setStreamSettings] = useState({
     network: "tcp",
-    security: "none",
+    security: "reality",
     certificate_id: "",
     // TCP配置
     tcp_header_type: "none",
+    tcp_request_path: "/",
+    tcp_request_host: "",
     // WebSocket配置
     ws_path: "/",
     ws_host: "",
@@ -82,16 +128,20 @@ export default function XrayManage() {
     http_host: "",
     // gRPC配置
     grpc_service_name: "",
+    grpc_multi_mode: false,
     // TLS配置
     tls_server_name: "",
     tls_alpn: "h2,http/1.1",
+    tls_fingerprint: "chrome",
+    tls_allow_insecure: false,
     // Reality配置
-    reality_dest: "www.microsoft.com:443",
-    reality_server_names: "www.microsoft.com",
+    reality_dest: "www.yahoo.com:443",
+    reality_server_names: "www.yahoo.com",
     reality_private_key: "",
     reality_public_key: "",
     reality_short_ids: "",
     reality_fingerprint: "chrome",
+    reality_spider_x: "/",
   });
 
   // Sniffing配置
@@ -106,11 +156,13 @@ export default function XrayManage() {
   const [selectedShareInbound, setSelectedShareInbound] = useState<XrayInbound | null>(null);
   const [qrCodeUrl, setQrCodeUrl] = useState<string>("");
 
+  // 显示/隐藏密钥
+  const [showKeys, setShowKeys] = useState(false);
+
   const fetchNodes = useCallback(async () => {
     try {
       const nodeList = await nodeService.getAll();
       setAllNodes(nodeList);
-      // 只显示在线节点用于选择
       setNodes(nodeList.filter((node: Node) => node.status === 'online'));
     } catch (error) {
       console.error('Failed to fetch nodes:', error);
@@ -133,7 +185,6 @@ export default function XrayManage() {
   const fetchCertificates = useCallback(async () => {
     try {
       const response: any = await api.get('/api/v1/certificates');
-      // 响应拦截器已解包，response 可能是 { certificates: [...], total } 或 { data: { certificates } }
       const certs = response?.certificates || response?.data?.certificates || [];
       setCertificates(Array.isArray(certs) ? certs : []);
     } catch (error) {
@@ -147,90 +198,54 @@ export default function XrayManage() {
     fetchNodes();
   }, [fetchInbounds, fetchCertificates, fetchNodes]);
 
-  const handleCreate = async () => {
-    // 节点选择验证
-    if (!selectedNodeId) {
-      toast.error("请选择一个节点");
-      return;
-    }
-
-    // 基本验证
-    if (!formData.remark || !formData.port) {
-      toast.error("请填写完整信息");
-      return;
-    }
-
-    // 端口验证
-    const port = parseInt(formData.port);
-    if (isNaN(port) || port < 1 || port > 65535) {
-      toast.error("端口号必须在 1-65535 之间");
-      return;
-    }
-
-    // 检查端口是否已被使用
-    if (inbounds.some(inbound => inbound.port === port)) {
-      toast.error(`端口 ${port} 已被其他入站使用`);
-      return;
-    }
-
-    // WebSocket配置验证
-    if (streamSettings.network === 'ws') {
-      if (!streamSettings.ws_path || !streamSettings.ws_path.startsWith('/')) {
-        toast.error('WebSocket 路径必须以 / 开头');
-        return;
+  // ============ 构建 Settings JSON ============
+  const buildSettings = (): string => {
+    const protocol = formData.protocol;
+    
+    switch (protocol) {
+      case "vless": {
+        const settings: any = {
+          decryption: "none",
+          clients: [{
+            id: protocolSettings.uuid,
+            flow: protocolSettings.flow || "",
+          }],
+        };
+        return JSON.stringify(settings);
       }
-    }
-
-    // gRPC配置验证
-    if (streamSettings.network === 'grpc' && !streamSettings.grpc_service_name) {
-      toast.error('请填写 gRPC 服务名称');
-      return;
-    }
-
-    // TLS配置验证
-    if (streamSettings.security === 'tls' && !streamSettings.certificate_id) {
-      toast.error('启用 TLS 加密时必须选择证书');
-      return;
-    }
-
-    try {
-      // 构建StreamSettings JSON
-      const streamSettingsJson = buildStreamSettings();
-      
-      // 构建Sniffing JSON
-      const sniffingJson = JSON.stringify({
-        enabled: sniffingEnabled,
-        destOverride: ["http", "tls", "quic"],
-        metadataOnly: false,
-      });
-
-      const result = await xrayService.createInbound({
-        remark: formData.remark,
-        port: parseInt(formData.port),
-        protocol: formData.protocol,
-        listen: formData.listen,
-        node_id: selectedNodeId, // 传递节点ID
-        stream_settings: streamSettingsJson,
-        sniffing: sniffingJson,
-      });
-      if (result.timedOut) {
-        toast.success("入站创建成功（后端正在重启Xray服务）");
-      } else {
-        toast.success("入站创建成功");
+      case "vmess": {
+        const settings: any = {
+          clients: [{
+            id: protocolSettings.uuid,
+            alterId: parseInt(protocolSettings.alterId) || 0,
+            security: protocolSettings.vmessSecurity || "auto",
+          }],
+        };
+        return JSON.stringify(settings);
       }
-      setCreateDialogOpen(false);
-      resetForm();
-      // 延迟一下再刷新列表，给后端时间完成数据库写入
-      setTimeout(() => fetchInbounds(), 1000);
-    } catch (error) {
-      console.error("Failed to create inbound:", error);
-      toast.error("创建入站失败");
-      // 即使失败也尝试刷新列表（可能数据已写入但Restart超时）
-      setTimeout(() => fetchInbounds(), 1000);
+      case "trojan": {
+        const settings: any = {
+          clients: [{
+            password: protocolSettings.trojanPassword,
+          }],
+        };
+        return JSON.stringify(settings);
+      }
+      case "shadowsocks": {
+        const settings: any = {
+          method: protocolSettings.ssMethod,
+          password: protocolSettings.ssPassword,
+          network: "tcp,udp",
+        };
+        return JSON.stringify(settings);
+      }
+      default:
+        return "{}";
     }
   };
 
-  const buildStreamSettings = () => {
+  // ============ 构建 StreamSettings JSON ============
+  const buildStreamSettings = (): string => {
     const settings: any = {
       network: streamSettings.network,
       security: streamSettings.security,
@@ -243,20 +258,31 @@ export default function XrayManage() {
           type: streamSettings.tcp_header_type || "none",
         },
       };
+      if (streamSettings.tcp_header_type === "http") {
+        settings.tcpSettings.header.request = {
+          path: streamSettings.tcp_request_path ? streamSettings.tcp_request_path.split(",") : ["/"],
+          headers: {
+            Host: streamSettings.tcp_request_host ? [streamSettings.tcp_request_host] : [],
+          },
+        };
+      }
     }
 
     // WebSocket配置
     if (streamSettings.network === "ws") {
       settings.wsSettings = {
-        path: streamSettings.ws_path,
+        path: streamSettings.ws_path || "/",
         headers: streamSettings.ws_host ? { Host: streamSettings.ws_host } : {},
       };
+      if (streamSettings.ws_host) {
+        settings.wsSettings.host = streamSettings.ws_host;
+      }
     }
 
     // HTTP/2配置
     if (streamSettings.network === "http") {
       settings.httpSettings = {
-        path: streamSettings.http_path,
+        path: streamSettings.http_path || "/",
         host: streamSettings.http_host ? [streamSettings.http_host] : [],
       };
     }
@@ -264,7 +290,8 @@ export default function XrayManage() {
     // gRPC配置
     if (streamSettings.network === "grpc") {
       settings.grpcSettings = {
-        serviceName: streamSettings.grpc_service_name,
+        serviceName: streamSettings.grpc_service_name || "",
+        multiMode: streamSettings.grpc_multi_mode || false,
       };
     }
 
@@ -273,58 +300,155 @@ export default function XrayManage() {
       const selectedCert = certificates.find(c => c.id.toString() === streamSettings.certificate_id);
       settings.tlsSettings = {
         serverName: streamSettings.tls_server_name || selectedCert?.domain || "",
-        alpn: streamSettings.tls_alpn.split(",").map(s => s.trim()),
+        alpn: streamSettings.tls_alpn ? streamSettings.tls_alpn.split(",").map(s => s.trim()) : ["h2", "http/1.1"],
+        settings: {
+          fingerprint: streamSettings.tls_fingerprint || "chrome",
+          allowInsecure: streamSettings.tls_allow_insecure || false,
+        },
       };
     }
 
-    // Reality配置
+    // Reality配置 - 完整结构，参考3x-ui
     if (streamSettings.security === "reality") {
       const shortIds = streamSettings.reality_short_ids
         ? streamSettings.reality_short_ids.split(",").map(s => s.trim())
         : [""];
       const serverNames = streamSettings.reality_server_names
         ? streamSettings.reality_server_names.split(",").map(s => s.trim())
-        : ["www.microsoft.com"];
+        : ["www.yahoo.com"];
       
       settings.realitySettings = {
         show: false,
-        dest: streamSettings.reality_dest || "www.microsoft.com:443",
+        dest: streamSettings.reality_dest || "www.yahoo.com:443",
         xver: 0,
         serverNames: serverNames,
         privateKey: streamSettings.reality_private_key,
         shortIds: shortIds,
-        fingerprint: streamSettings.reality_fingerprint || "chrome",
+        // settings子对象 - 客户端需要的参数
+        settings: {
+          publicKey: streamSettings.reality_public_key,
+          fingerprint: streamSettings.reality_fingerprint || "chrome",
+          spiderX: streamSettings.reality_spider_x || "/",
+        },
       };
     }
 
     return JSON.stringify(settings);
   };
 
+  // ============ 创建入站 ============
+  const handleCreate = async () => {
+    if (!selectedNodeId) {
+      toast.error("请选择一个节点");
+      return;
+    }
+
+    if (!formData.remark || !formData.port) {
+      toast.error("请填写完整信息");
+      return;
+    }
+
+    const port = parseInt(formData.port);
+    if (isNaN(port) || port < 1 || port > 65535) {
+      toast.error("端口号必须在 1-65535 之间");
+      return;
+    }
+
+    if (inbounds.some(inbound => inbound.port === port)) {
+      toast.error(`端口 ${port} 已被其他入站使用`);
+      return;
+    }
+
+    // Reality验证
+    if (streamSettings.security === "reality") {
+      if (!streamSettings.reality_private_key || !streamSettings.reality_public_key) {
+        toast.error("Reality 协议需要填写私钥和公钥（使用 xray x25519 命令生成）");
+        return;
+      }
+    }
+
+    // TLS验证
+    if (streamSettings.security === "tls" && !streamSettings.certificate_id) {
+      toast.error("启用 TLS 加密时必须选择证书");
+      return;
+    }
+
+    try {
+      const settingsJson = buildSettings();
+      const streamSettingsJson = buildStreamSettings();
+      const sniffingJson = JSON.stringify({
+        enabled: sniffingEnabled,
+        destOverride: ["http", "tls", "quic"],
+        metadataOnly: false,
+      });
+
+      const result = await xrayService.createInbound({
+        remark: formData.remark,
+        port: parseInt(formData.port),
+        protocol: formData.protocol,
+        listen: formData.listen,
+        node_id: parseInt(selectedNodeId),
+        settings: settingsJson,
+        stream_settings: streamSettingsJson,
+        sniffing: sniffingJson,
+      });
+      if (result.timedOut) {
+        toast.success("入站创建成功（后端正在重启Xray服务）");
+      } else {
+        toast.success("入站创建成功");
+      }
+      setCreateDialogOpen(false);
+      resetForm();
+      setTimeout(() => fetchInbounds(), 1000);
+    } catch (error) {
+      console.error("Failed to create inbound:", error);
+      toast.error("创建入站失败");
+      setTimeout(() => fetchInbounds(), 1000);
+    }
+  };
+
   const resetForm = () => {
-    setFormData({ remark: "", port: "", protocol: "vmess", listen: "0.0.0.0" });
+    setFormData({ remark: "", port: "", protocol: "vless", listen: "0.0.0.0" });
+    setProtocolSettings({
+      uuid: generateUUID(),
+      flow: "",
+      alterId: "0",
+      vmessSecurity: "auto",
+      trojanPassword: generateUUID(),
+      ssMethod: "aes-256-gcm",
+      ssPassword: generateUUID(),
+    });
     setStreamSettings({
       network: "tcp",
-      security: "none",
+      security: "reality",
       certificate_id: "",
       tcp_header_type: "none",
+      tcp_request_path: "/",
+      tcp_request_host: "",
       ws_path: "/",
       ws_host: "",
       http_path: "/",
       http_host: "",
       grpc_service_name: "",
+      grpc_multi_mode: false,
       tls_server_name: "",
       tls_alpn: "h2,http/1.1",
-      reality_dest: "www.microsoft.com:443",
-      reality_server_names: "www.microsoft.com",
+      tls_fingerprint: "chrome",
+      tls_allow_insecure: false,
+      reality_dest: "www.yahoo.com:443",
+      reality_server_names: "www.yahoo.com",
       reality_private_key: "",
       reality_public_key: "",
       reality_short_ids: "",
       reality_fingerprint: "chrome",
+      reality_spider_x: "/",
     });
     setSniffingEnabled(true);
     setSelectedNodeId("");
+    setShowKeys(false);
   };
 
+  // ============ 编辑入站 ============
   const handleEdit = async () => {
     if (!selectedInbound) return;
 
@@ -334,6 +458,7 @@ export default function XrayManage() {
     }
 
     try {
+      const settingsJson = buildSettings();
       const streamSettingsJson = buildStreamSettings();
       const sniffingJson = JSON.stringify({
         enabled: sniffingEnabled,
@@ -341,12 +466,12 @@ export default function XrayManage() {
         metadataOnly: false,
       });
 
-      // 必须发送所有必填字段: remark, port, protocol
       const result = await xrayService.updateInbound(selectedInbound.id, {
         remark: formData.remark,
         port: parseInt(formData.port),
         protocol: formData.protocol,
         listen: formData.listen,
+        settings: settingsJson,
         stream_settings: streamSettingsJson,
         sniffing: sniffingJson,
       });
@@ -357,12 +482,10 @@ export default function XrayManage() {
       }
       setEditDialogOpen(false);
       resetForm();
-      // 延迟刷新列表
       setTimeout(() => fetchInbounds(), 1000);
     } catch (error) {
       console.error("Failed to update inbound:", error);
       toast.error("更新入站失败");
-      // 即使失败也刷新
       setTimeout(() => fetchInbounds(), 1000);
     }
   };
@@ -377,33 +500,26 @@ export default function XrayManage() {
       } else {
         toast.success("入站删除成功");
       }
-      // 延迟刷新列表
       setTimeout(() => fetchInbounds(), 1000);
     } catch (error) {
       console.error("Failed to delete inbound:", error);
       toast.error("删除入站失败");
-      // 即使失败也刷新（数据可能已删除）
       setTimeout(() => fetchInbounds(), 1000);
     }
   };
 
-  // 修复 handleToggle - 必须发送完整的入站数据
   const handleToggle = async (inbound: XrayInbound) => {
     setToggling(inbound.id);
     try {
-      const currentEnabled = inbound.enable ?? inbound.enabled ?? true;
-      
-      // 解析现有的stream_settings和sniffing
       let streamSettingsStr = inbound.stream_settings || '{"network":"tcp","security":"none"}';
       let sniffingStr = inbound.sniffing || '{"enabled":true,"destOverride":["http","tls","quic"],"metadataOnly":false}';
 
-      // 后端 UpdateInbound 使用 CreateInboundRequest 结构体
-      // 必须发送所有 required 字段: remark, port, protocol
       const result = await xrayService.updateInbound(inbound.id, {
         remark: inbound.remark,
         port: inbound.port,
         protocol: inbound.protocol,
         listen: inbound.listen || "0.0.0.0",
+        settings: inbound.settings || "{}",
         stream_settings: streamSettingsStr,
         sniffing: sniffingStr,
       });
@@ -413,12 +529,10 @@ export default function XrayManage() {
       } else {
         toast.success("入站配置已更新");
       }
-      // 延迟刷新列表
       setTimeout(() => fetchInbounds(), 1000);
     } catch (error) {
       console.error("Failed to toggle inbound:", error);
       toast.error("操作失败");
-      // 即使失败也刷新
       setTimeout(() => fetchInbounds(), 1000);
     } finally {
       setToggling(null);
@@ -434,25 +548,91 @@ export default function XrayManage() {
       listen: inbound.listen || "0.0.0.0",
     });
     
+    // 解析Settings
+    if (inbound.settings) {
+      try {
+        const parsed = typeof inbound.settings === 'string' 
+          ? JSON.parse(inbound.settings) 
+          : inbound.settings;
+        
+        const protocol = inbound.protocol.toLowerCase();
+        if (protocol === "vless" || protocol === "vmess") {
+          const client = parsed.clients?.[0] || {};
+          setProtocolSettings(prev => ({
+            ...prev,
+            uuid: client.id || client.uuid || generateUUID(),
+            flow: client.flow || "",
+            alterId: (client.alterId || 0).toString(),
+            vmessSecurity: client.security || "auto",
+          }));
+        } else if (protocol === "trojan") {
+          const client = parsed.clients?.[0] || {};
+          setProtocolSettings(prev => ({
+            ...prev,
+            trojanPassword: client.password || parsed.password || generateUUID(),
+          }));
+        } else if (protocol === "shadowsocks") {
+          setProtocolSettings(prev => ({
+            ...prev,
+            ssMethod: parsed.method || "aes-256-gcm",
+            ssPassword: parsed.password || generateUUID(),
+          }));
+        }
+      } catch (e) {
+        console.error("Failed to parse settings:", e);
+      }
+    }
+    
     // 解析StreamSettings
     if (inbound.stream_settings) {
       try {
         const parsed = typeof inbound.stream_settings === 'string' 
           ? JSON.parse(inbound.stream_settings) 
           : inbound.stream_settings;
-        setStreamSettings({
+        
+        const newStreamSettings: any = {
           network: parsed.network || "tcp",
           security: parsed.security || "none",
           certificate_id: "",
           tcp_header_type: parsed.tcpSettings?.header?.type || "none",
+          tcp_request_path: "/",
+          tcp_request_host: "",
           ws_path: parsed.wsSettings?.path || "/",
-          ws_host: parsed.wsSettings?.headers?.Host || "",
+          ws_host: parsed.wsSettings?.host || parsed.wsSettings?.headers?.Host || "",
           http_path: parsed.httpSettings?.path || "/",
           http_host: parsed.httpSettings?.host?.[0] || "",
           grpc_service_name: parsed.grpcSettings?.serviceName || "",
+          grpc_multi_mode: parsed.grpcSettings?.multiMode || false,
           tls_server_name: parsed.tlsSettings?.serverName || "",
           tls_alpn: parsed.tlsSettings?.alpn?.join(",") || "h2,http/1.1",
-        });
+          tls_fingerprint: parsed.tlsSettings?.settings?.fingerprint || parsed.tlsSettings?.fingerprint || "chrome",
+          tls_allow_insecure: parsed.tlsSettings?.settings?.allowInsecure || false,
+          reality_dest: parsed.realitySettings?.dest || "www.yahoo.com:443",
+          reality_server_names: Array.isArray(parsed.realitySettings?.serverNames) 
+            ? parsed.realitySettings.serverNames.join(",") 
+            : (parsed.realitySettings?.serverNames || "www.yahoo.com"),
+          reality_private_key: parsed.realitySettings?.privateKey || "",
+          reality_public_key: parsed.realitySettings?.settings?.publicKey || parsed.realitySettings?.publicKey || "",
+          reality_short_ids: Array.isArray(parsed.realitySettings?.shortIds)
+            ? parsed.realitySettings.shortIds.join(",")
+            : (parsed.realitySettings?.shortIds || ""),
+          reality_fingerprint: parsed.realitySettings?.settings?.fingerprint || parsed.realitySettings?.fingerprint || "chrome",
+          reality_spider_x: parsed.realitySettings?.settings?.spiderX || "/",
+        };
+        
+        // TCP HTTP伪装的path和host
+        if (parsed.tcpSettings?.header?.type === "http") {
+          const request = parsed.tcpSettings.header.request;
+          if (request?.path) {
+            newStreamSettings.tcp_request_path = Array.isArray(request.path) ? request.path.join(",") : request.path;
+          }
+          if (request?.headers?.Host) {
+            newStreamSettings.tcp_request_host = Array.isArray(request.headers.Host) 
+              ? request.headers.Host[0] : request.headers.Host;
+          }
+        }
+        
+        setStreamSettings(newStreamSettings);
       } catch (e) {
         console.error("Failed to parse stream_settings:", e);
       }
@@ -491,36 +671,40 @@ export default function XrayManage() {
     }
   };
 
+  // 查找节点的辅助函数
+  const findNodeForInbound = useCallback((inbound: XrayInbound): Node | undefined => {
+    // 优先通过node_id匹配
+    if (inbound.node_id && inbound.node_id > 0) {
+      const node = allNodes.find(n => n.id === inbound.node_id);
+      if (node) return node;
+    }
+    // fallback: 通过listen地址匹配（只有匹配到才返回，否则继续往下）
+    if (inbound.listen && inbound.listen !== "0.0.0.0") {
+      const node = allNodes.find(n => n.host === inbound.listen);
+      if (node) return node;
+    }
+    // 如果只有一个节点，默认使用它
+    if (allNodes.length === 1) return allNodes[0];
+    return undefined;
+  }, [allNodes]);
+
   // 打开分享链接对话框
   const handleOpenShareLink = async (inbound: XrayInbound) => {
     setSelectedShareInbound(inbound);
     
-    // 尝试通过node_id匹配（仅当node_id > 0时）
-    let node = inbound.node_id && inbound.node_id > 0
-      ? allNodes.find(n => n.id === inbound.node_id)
-      : undefined;
-    
-    // 如果没有找到，尝试使用listen地址匹配
-    if (!node && inbound.listen) {
-      node = allNodes.find(n => n.host === inbound.listen);
-    }
-    
+    const node = findNodeForInbound(inbound);
     const shareLink = node ? generateShareLink(inbound, node) : '';
     
     if (!shareLink) {
-      toast.error("无法生成分享链接，请检查节点配置");
+      toast.error("无法生成分享链接，请检查节点配置（确保入站关联了节点）");
       return;
     }
     
-    // 生成二维码
     try {
       const qrUrl = await QRCode.toDataURL(shareLink, {
         width: 300,
         margin: 2,
-        color: {
-          dark: '#000000',
-          light: '#ffffff',
-        },
+        color: { dark: '#000000', light: '#ffffff' },
       });
       setQrCodeUrl(qrUrl);
     } catch (error) {
@@ -535,17 +719,8 @@ export default function XrayManage() {
   const handleCopyShareLink = async () => {
     if (!selectedShareInbound) return;
     
-    // 尝试通过node_id匹配（仅当node_id > 0时）
-    let node = selectedShareInbound.node_id && selectedShareInbound.node_id > 0
-      ? allNodes.find(n => n.id === selectedShareInbound.node_id)
-      : undefined;
-    
-    // 如果没有找到，尝试使用listen地址匹配
-    if (!node && selectedShareInbound.listen) {
-      node = allNodes.find(n => n.host === selectedShareInbound.listen);
-      console.log('Using listen address fallback:', selectedShareInbound.listen, 'found node:', node);
-    }
-    const shareLink = generateShareLink(selectedShareInbound, node);
+    const node = findNodeForInbound(selectedShareInbound);
+    const shareLink = node ? generateShareLink(selectedShareInbound, node) : '';
     
     if (!shareLink) {
       toast.error("无法生成分享链接");
@@ -564,7 +739,153 @@ export default function XrayManage() {
   const enabledCount = inbounds.filter((i) => i.enable || i.enabled).length;
   const totalClients = inbounds.reduce((sum, i) => sum + (i.clients?.length || 0), 0);
 
-  // 渲染传输层配置表单（创建和编辑共用）
+  // ============ 协议设置表单 ============
+  const renderProtocolForm = () => {
+    const protocol = formData.protocol;
+    
+    return (
+      <div className="space-y-4">
+        {(protocol === "vless" || protocol === "vmess") && (
+          <>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>UUID / ID</Label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setProtocolSettings({ ...protocolSettings, uuid: generateUUID() })}
+                  className="h-6 text-xs"
+                >
+                  <RefreshCw className="w-3 h-3 mr-1" />
+                  重新生成
+                </Button>
+              </div>
+              <Input
+                value={protocolSettings.uuid}
+                onChange={(e) => setProtocolSettings({ ...protocolSettings, uuid: e.target.value })}
+                className="font-mono text-sm"
+              />
+            </div>
+            
+            {protocol === "vless" && streamSettings.security === "reality" && (
+              <div className="space-y-2">
+                <Label>Flow</Label>
+                <Select
+                  value={protocolSettings.flow}
+                  onValueChange={(value) => setProtocolSettings({ ...protocolSettings, flow: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="选择Flow（可选）" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">无</SelectItem>
+                    <SelectItem value="xtls-rprx-vision">xtls-rprx-vision</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Reality + TCP 推荐使用 xtls-rprx-vision</p>
+              </div>
+            )}
+
+            {protocol === "vmess" && (
+              <>
+                <div className="space-y-2">
+                  <Label>AlterID</Label>
+                  <Input
+                    type="number"
+                    value={protocolSettings.alterId}
+                    onChange={(e) => setProtocolSettings({ ...protocolSettings, alterId: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground">推荐设为 0</p>
+                </div>
+                <div className="space-y-2">
+                  <Label>加密方式</Label>
+                  <Select
+                    value={protocolSettings.vmessSecurity}
+                    onValueChange={(value) => setProtocolSettings({ ...protocolSettings, vmessSecurity: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="auto">auto</SelectItem>
+                      <SelectItem value="aes-128-gcm">aes-128-gcm</SelectItem>
+                      <SelectItem value="chacha20-poly1305">chacha20-poly1305</SelectItem>
+                      <SelectItem value="none">none</SelectItem>
+                      <SelectItem value="zero">zero</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {protocol === "trojan" && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>密码</Label>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setProtocolSettings({ ...protocolSettings, trojanPassword: generateUUID() })}
+                className="h-6 text-xs"
+              >
+                <RefreshCw className="w-3 h-3 mr-1" />
+                重新生成
+              </Button>
+            </div>
+            <Input
+              value={protocolSettings.trojanPassword}
+              onChange={(e) => setProtocolSettings({ ...protocolSettings, trojanPassword: e.target.value })}
+              className="font-mono text-sm"
+            />
+          </div>
+        )}
+
+        {protocol === "shadowsocks" && (
+          <>
+            <div className="space-y-2">
+              <Label>加密方式</Label>
+              <Select
+                value={protocolSettings.ssMethod}
+                onValueChange={(value) => setProtocolSettings({ ...protocolSettings, ssMethod: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SS_METHODS.map(m => (
+                    <SelectItem key={m} value={m}>{m}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>密码</Label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setProtocolSettings({ ...protocolSettings, ssPassword: generateUUID() })}
+                  className="h-6 text-xs"
+                >
+                  <RefreshCw className="w-3 h-3 mr-1" />
+                  重新生成
+                </Button>
+              </div>
+              <Input
+                value={protocolSettings.ssPassword}
+                onChange={(e) => setProtocolSettings({ ...protocolSettings, ssPassword: e.target.value })}
+                className="font-mono text-sm"
+              />
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  // ============ 传输层配置表单 ============
   const renderTransportForm = () => (
     <div className="space-y-4">
       <div className="space-y-2">
@@ -587,21 +908,43 @@ export default function XrayManage() {
       </div>
 
       {streamSettings.network === "tcp" && (
-        <div className="space-y-2">
-          <Label>TCP伪装类型</Label>
-          <Select
-            value={streamSettings.tcp_header_type}
-            onValueChange={(value) => setStreamSettings({ ...streamSettings, tcp_header_type: value })}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">无</SelectItem>
-              <SelectItem value="http">HTTP</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <>
+          <div className="space-y-2">
+            <Label>TCP伪装类型</Label>
+            <Select
+              value={streamSettings.tcp_header_type}
+              onValueChange={(value) => setStreamSettings({ ...streamSettings, tcp_header_type: value })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">无</SelectItem>
+                <SelectItem value="http">HTTP</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {streamSettings.tcp_header_type === "http" && (
+            <>
+              <div className="space-y-2">
+                <Label>HTTP请求路径</Label>
+                <Input
+                  placeholder="/"
+                  value={streamSettings.tcp_request_path}
+                  onChange={(e) => setStreamSettings({ ...streamSettings, tcp_request_path: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>HTTP请求Host</Label>
+                <Input
+                  placeholder="example.com"
+                  value={streamSettings.tcp_request_host}
+                  onChange={(e) => setStreamSettings({ ...streamSettings, tcp_request_host: e.target.value })}
+                />
+              </div>
+            </>
+          )}
+        </>
       )}
 
       {streamSettings.network === "ws" && (
@@ -647,16 +990,26 @@ export default function XrayManage() {
       )}
 
       {streamSettings.network === "grpc" && (
-        <div className="space-y-2">
-          <Label>gRPC服务名</Label>
-          <Input
-            placeholder="GunService"
-            value={streamSettings.grpc_service_name}
-            onChange={(e) => setStreamSettings({ ...streamSettings, grpc_service_name: e.target.value })}
-          />
-        </div>
+        <>
+          <div className="space-y-2">
+            <Label>gRPC服务名</Label>
+            <Input
+              placeholder="GunService"
+              value={streamSettings.grpc_service_name}
+              onChange={(e) => setStreamSettings({ ...streamSettings, grpc_service_name: e.target.value })}
+            />
+          </div>
+          <div className="flex items-center justify-between">
+            <Label>Multi Mode</Label>
+            <Switch
+              checked={streamSettings.grpc_multi_mode}
+              onCheckedChange={(checked) => setStreamSettings({ ...streamSettings, grpc_multi_mode: checked })}
+            />
+          </div>
+        </>
       )}
 
+      {/* 安全传输 */}
       <div className="space-y-2">
         <Label>安全传输</Label>
         <Select
@@ -674,6 +1027,7 @@ export default function XrayManage() {
         </Select>
       </div>
 
+      {/* TLS配置 */}
       {streamSettings.security === "tls" && (
         <>
           <div className="space-y-2">
@@ -715,7 +1069,7 @@ export default function XrayManage() {
             </div>
           </div>
           <div className="space-y-2">
-            <Label>Server Name (可选)</Label>
+            <Label>Server Name (SNI)</Label>
             <Input
               placeholder="自动使用证书域名"
               value={streamSettings.tls_server_name}
@@ -730,52 +1084,113 @@ export default function XrayManage() {
               onChange={(e) => setStreamSettings({ ...streamSettings, tls_alpn: e.target.value })}
             />
           </div>
+          <div className="space-y-2">
+            <Label>浏览器指纹 (uTLS)</Label>
+            <Select
+              value={streamSettings.tls_fingerprint}
+              onValueChange={(value) => setStreamSettings({ ...streamSettings, tls_fingerprint: value })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FINGERPRINTS.map(fp => (
+                  <SelectItem key={fp} value={fp}>{fp}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center justify-between">
+            <Label>允许不安全连接</Label>
+            <Switch
+              checked={streamSettings.tls_allow_insecure}
+              onCheckedChange={(checked) => setStreamSettings({ ...streamSettings, tls_allow_insecure: checked })}
+            />
+          </div>
         </>
       )}
 
+      {/* Reality配置 */}
       {streamSettings.security === "reality" && (
         <>
+          <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-lg">
+            <p className="text-xs text-purple-300">
+              Reality 是一种先进的传输安全协议，无需证书即可实现加密。需要使用 <code className="bg-purple-500/20 px-1 rounded">xray x25519</code> 命令在服务器上生成密钥对。
+            </p>
+          </div>
+          
           <div className="space-y-2">
             <Label>目标地址 (Dest)</Label>
             <Input
-              placeholder="www.microsoft.com:443"
+              placeholder="www.yahoo.com:443"
               value={streamSettings.reality_dest}
               onChange={(e) => setStreamSettings({ ...streamSettings, reality_dest: e.target.value })}
             />
-            <p className="text-xs text-muted-foreground">伪装目标网站，建议使用大型网站如 microsoft.com</p>
+            <p className="text-xs text-muted-foreground">伪装目标网站，建议使用支持TLS1.3和H2的大型网站</p>
           </div>
           <div className="space-y-2">
-            <Label>服务器名 (Server Names)</Label>
+            <Label>服务器名 (Server Names / SNI)</Label>
             <Input
-              placeholder="www.microsoft.com"
+              placeholder="www.yahoo.com"
               value={streamSettings.reality_server_names}
               onChange={(e) => setStreamSettings({ ...streamSettings, reality_server_names: e.target.value })}
             />
-            <p className="text-xs text-muted-foreground">多个域名用逗号分隔</p>
+            <p className="text-xs text-muted-foreground">多个域名用逗号分隔，需与Dest域名匹配</p>
           </div>
+          
           <div className="space-y-2">
-            <Label>私钥 (Private Key)</Label>
+            <div className="flex items-center justify-between">
+              <Label>私钥 (Private Key) - 服务端</Label>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowKeys(!showKeys)}
+                className="h-6 text-xs"
+              >
+                {showKeys ? <EyeOff className="w-3 h-3 mr-1" /> : <Eye className="w-3 h-3 mr-1" />}
+                {showKeys ? "隐藏" : "显示"}
+              </Button>
+            </div>
             <Input
-              placeholder="服务端私钥"
+              type={showKeys ? "text" : "password"}
+              placeholder="使用 xray x25519 生成"
               value={streamSettings.reality_private_key}
               onChange={(e) => setStreamSettings({ ...streamSettings, reality_private_key: e.target.value })}
+              className="font-mono text-sm"
             />
-            <p className="text-xs text-muted-foreground">使用 xray x25519 命令生成密钥对</p>
           </div>
           <div className="space-y-2">
-            <Label>公钥 (Public Key)</Label>
+            <Label>公钥 (Public Key) - 客户端</Label>
             <Input
-              placeholder="客户端公钥"
+              type={showKeys ? "text" : "password"}
+              placeholder="使用 xray x25519 生成"
               value={streamSettings.reality_public_key}
               onChange={(e) => setStreamSettings({ ...streamSettings, reality_public_key: e.target.value })}
+              className="font-mono text-sm"
             />
+            <p className="text-xs text-muted-foreground">公钥会包含在分享链接中，客户端需要此密钥连接</p>
           </div>
           <div className="space-y-2">
-            <Label>短 ID (Short IDs)</Label>
+            <div className="flex items-center justify-between">
+              <Label>短 ID (Short IDs)</Label>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setStreamSettings({ 
+                  ...streamSettings, 
+                  reality_short_ids: generateShortId() 
+                })}
+                className="h-6 text-xs"
+              >
+                <RefreshCw className="w-3 h-3 mr-1" />
+                随机生成
+              </Button>
+            </div>
             <Input
               placeholder="留空或 0-16位十六进制，多个用逗号分隔"
               value={streamSettings.reality_short_ids}
               onChange={(e) => setStreamSettings({ ...streamSettings, reality_short_ids: e.target.value })}
+              className="font-mono text-sm"
             />
           </div>
           <div className="space-y-2">
@@ -788,16 +1203,156 @@ export default function XrayManage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="chrome">Chrome</SelectItem>
-                <SelectItem value="firefox">Firefox</SelectItem>
-                <SelectItem value="safari">Safari</SelectItem>
-                <SelectItem value="edge">Edge</SelectItem>
+                {FINGERPRINTS.map(fp => (
+                  <SelectItem key={fp} value={fp}>{fp}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>SpiderX</Label>
+            <Input
+              placeholder="/"
+              value={streamSettings.reality_spider_x}
+              onChange={(e) => setStreamSettings({ ...streamSettings, reality_spider_x: e.target.value })}
+            />
+            <p className="text-xs text-muted-foreground">爬虫路径，用于主动探测防御</p>
           </div>
         </>
       )}
     </div>
+  );
+
+  // ============ 入站创建/编辑对话框内容 ============
+  const renderFormDialogContent = (isEdit: boolean) => (
+    <Tabs defaultValue="basic" className="w-full">
+      <TabsList className="grid w-full grid-cols-4">
+        <TabsTrigger value="basic">基础配置</TabsTrigger>
+        <TabsTrigger value="protocol">协议设置</TabsTrigger>
+        <TabsTrigger value="transport">传输层</TabsTrigger>
+        <TabsTrigger value="advanced">高级选项</TabsTrigger>
+      </TabsList>
+      
+      <TabsContent value="basic" className="space-y-4">
+        {!isEdit && (
+          <div className="space-y-2">
+            <Label htmlFor="node">选择节点</Label>
+            <Select
+              value={selectedNodeId}
+              onValueChange={(value) => setSelectedNodeId(value)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="选择一个在线节点" />
+              </SelectTrigger>
+              <SelectContent>
+                {nodes.length === 0 ? (
+                  <SelectItem value="none" disabled>
+                    暂无在线节点 (共{allNodes.length}个节点)
+                  </SelectItem>
+                ) : (
+                  nodes.map((node) => (
+                    <SelectItem key={node.id} value={String(node.id)}>
+                      {node.name} ({node.host}:{node.port}) - {node.type}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+            {nodes.length === 0 && allNodes.length > 0 && (
+              <p className="text-xs text-yellow-400 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                有 {allNodes.length} 个节点但均不在线，请检查节点状态
+              </p>
+            )}
+            {allNodes.length === 0 && (
+              <p className="text-xs text-yellow-400 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                尚未添加任何节点，请先在节点管理页面添加节点
+              </p>
+            )}
+          </div>
+        )}
+        <div className="space-y-2">
+          <Label htmlFor="remark">备注</Label>
+          <Input
+            id="remark"
+            placeholder="例如: VLESS Reality 日本"
+            value={formData.remark}
+            onChange={(e) => setFormData({ ...formData, remark: e.target.value })}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="protocol">协议</Label>
+          <Select
+            value={formData.protocol}
+            onValueChange={(value) => {
+              setFormData({ ...formData, protocol: value });
+              // 切换协议时自动调整安全设置
+              if (value === "vless") {
+                setStreamSettings(prev => ({ ...prev, security: "reality" }));
+              } else if (value === "trojan") {
+                setStreamSettings(prev => ({ ...prev, security: "tls" }));
+              } else {
+                setStreamSettings(prev => ({ ...prev, security: "none" }));
+              }
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="vless">VLESS</SelectItem>
+              <SelectItem value="vmess">VMess</SelectItem>
+              <SelectItem value="trojan">Trojan</SelectItem>
+              <SelectItem value="shadowsocks">Shadowsocks</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="port">端口</Label>
+          <Input
+            id="port"
+            type="number"
+            placeholder="例如: 443"
+            value={formData.port}
+            onChange={(e) => setFormData({ ...formData, port: e.target.value })}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="listen">监听地址</Label>
+          <Input
+            id="listen"
+            placeholder="0.0.0.0"
+            value={formData.listen}
+            onChange={(e) => setFormData({ ...formData, listen: e.target.value })}
+          />
+          <p className="text-xs text-muted-foreground">默认 0.0.0.0 监听所有地址</p>
+        </div>
+      </TabsContent>
+      
+      <TabsContent value="protocol">
+        {renderProtocolForm()}
+      </TabsContent>
+      
+      <TabsContent value="transport">
+        {renderTransportForm()}
+      </TabsContent>
+      
+      <TabsContent value="advanced" className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <Label>流量探测 (Sniffing)</Label>
+            <p className="text-sm text-muted-foreground">
+              自动识别HTTP/TLS流量并路由
+            </p>
+          </div>
+          <Switch
+            checked={sniffingEnabled}
+            onCheckedChange={setSniffingEnabled}
+          />
+        </div>
+      </TabsContent>
+    </Tabs>
   );
 
   return (
@@ -816,7 +1371,7 @@ export default function XrayManage() {
               <RefreshCw className="w-4 h-4 mr-2" />
               刷新
             </Button>
-            <Button onClick={() => { fetchNodes(); setCreateDialogOpen(true); }}>
+            <Button onClick={() => { fetchNodes(); resetForm(); setCreateDialogOpen(true); }}>
               <Plus className="w-4 h-4 mr-2" />
               创建入站
             </Button>
@@ -868,7 +1423,7 @@ export default function XrayManage() {
                 <p className="text-3xl font-bold">{certificates.length}</p>
               </div>
               <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center">
-                <Users className="w-6 h-6 text-white" />
+                <Key className="w-6 h-6 text-white" />
               </div>
             </div>
           </Card>
@@ -893,6 +1448,7 @@ export default function XrayManage() {
                     <TableHead className="text-white/80">端口</TableHead>
                     <TableHead className="text-white/80">传输</TableHead>
                     <TableHead className="text-white/80">安全</TableHead>
+                    <TableHead className="text-white/80">节点</TableHead>
                     <TableHead className="text-white/80">状态</TableHead>
                     <TableHead className="text-white/80 text-right">操作</TableHead>
                   </TableRow>
@@ -910,6 +1466,7 @@ export default function XrayManage() {
                     } catch (e) {}
                     
                     const isEnabled = inbound.enable ?? inbound.enabled ?? true;
+                    const associatedNode = findNodeForInbound(inbound);
                     
                     return (
                       <TableRow
@@ -945,6 +1502,15 @@ export default function XrayManage() {
                           )}
                         </TableCell>
                         <TableCell>
+                          {associatedNode ? (
+                            <Badge variant="outline" className="border-blue-500/50 text-blue-400">
+                              {associatedNode.name}
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="text-yellow-400">未关联</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
                           <Badge
                             variant={isEnabled ? "default" : "secondary"}
                             className={
@@ -957,7 +1523,7 @@ export default function XrayManage() {
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-2">
+                          <div className="flex items-center justify-end gap-1">
                             <Button
                               variant="ghost"
                               size="sm"
@@ -1024,116 +1590,7 @@ export default function XrayManage() {
               </DialogDescription>
             </DialogHeader>
             
-            <Tabs defaultValue="basic" className="w-full">
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="basic">基础配置</TabsTrigger>
-                <TabsTrigger value="transport">传输层</TabsTrigger>
-                <TabsTrigger value="advanced">高级选项</TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="basic" className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="node">选择节点</Label>
-                  <Select
-                    value={selectedNodeId}
-                    onValueChange={(value) => setSelectedNodeId(value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择一个在线节点" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {nodes.length === 0 ? (
-                        <SelectItem value="none" disabled>
-                          暂无在线节点 (共{allNodes.length}个节点)
-                        </SelectItem>
-                      ) : (
-                        nodes.map((node) => (
-                          <SelectItem key={node.id} value={String(node.id)}>
-                            {node.name} ({node.host}:{node.port}) - {node.type}
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                  {nodes.length === 0 && allNodes.length > 0 && (
-                    <p className="text-xs text-yellow-400 flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" />
-                      有 {allNodes.length} 个节点但均不在线，请检查节点状态
-                    </p>
-                  )}
-                  {allNodes.length === 0 && (
-                    <p className="text-xs text-yellow-400 flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" />
-                      尚未添加任何节点，请先在节点管理页面添加节点
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="remark">备注</Label>
-                  <Input
-                    id="remark"
-                    placeholder="例如: VMess 主节点"
-                    value={formData.remark}
-                    onChange={(e) => setFormData({ ...formData, remark: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="protocol">协议</Label>
-                  <Select
-                    value={formData.protocol}
-                    onValueChange={(value) => setFormData({ ...formData, protocol: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="vmess">VMess</SelectItem>
-                      <SelectItem value="vless">VLESS</SelectItem>
-                      <SelectItem value="trojan">Trojan</SelectItem>
-                      <SelectItem value="shadowsocks">Shadowsocks</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="port">端口</Label>
-                  <Input
-                    id="port"
-                    type="number"
-                    placeholder="例如: 10086"
-                    value={formData.port}
-                    onChange={(e) => setFormData({ ...formData, port: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="listen">监听地址</Label>
-                  <Input
-                    id="listen"
-                    placeholder="0.0.0.0"
-                    value={formData.listen}
-                    onChange={(e) => setFormData({ ...formData, listen: e.target.value })}
-                  />
-                </div>
-              </TabsContent>
-              
-              <TabsContent value="transport">
-                {renderTransportForm()}
-              </TabsContent>
-              
-              <TabsContent value="advanced" className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>流量探测 (Sniffing)</Label>
-                    <p className="text-sm text-muted-foreground">
-                      自动识别HTTP/TLS流量并路由
-                    </p>
-                  </div>
-                  <Switch
-                    checked={sniffingEnabled}
-                    onCheckedChange={setSniffingEnabled}
-                  />
-                </div>
-              </TabsContent>
-            </Tabs>
+            {renderFormDialogContent(false)}
 
             <DialogFooter>
               <Button variant="outline" onClick={() => {
@@ -1157,77 +1614,7 @@ export default function XrayManage() {
               </DialogDescription>
             </DialogHeader>
             
-            <Tabs defaultValue="basic" className="w-full">
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="basic">基础配置</TabsTrigger>
-                <TabsTrigger value="transport">传输层</TabsTrigger>
-                <TabsTrigger value="advanced">高级选项</TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="basic" className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="edit-remark">备注</Label>
-                  <Input
-                    id="edit-remark"
-                    value={formData.remark}
-                    onChange={(e) => setFormData({ ...formData, remark: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-protocol">协议</Label>
-                  <Select
-                    value={formData.protocol}
-                    onValueChange={(value) => setFormData({ ...formData, protocol: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="vmess">VMess</SelectItem>
-                      <SelectItem value="vless">VLESS</SelectItem>
-                      <SelectItem value="trojan">Trojan</SelectItem>
-                      <SelectItem value="shadowsocks">Shadowsocks</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-port">端口</Label>
-                  <Input
-                    id="edit-port"
-                    type="number"
-                    value={formData.port}
-                    onChange={(e) => setFormData({ ...formData, port: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="edit-listen">监听地址</Label>
-                  <Input
-                    id="edit-listen"
-                    value={formData.listen}
-                    onChange={(e) => setFormData({ ...formData, listen: e.target.value })}
-                  />
-                </div>
-              </TabsContent>
-              
-              <TabsContent value="transport">
-                {renderTransportForm()}
-              </TabsContent>
-              
-              <TabsContent value="advanced" className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>流量探测 (Sniffing)</Label>
-                    <p className="text-sm text-muted-foreground">
-                      自动识别HTTP/TLS流量并路由
-                    </p>
-                  </div>
-                  <Switch
-                    checked={sniffingEnabled}
-                    onCheckedChange={setSniffingEnabled}
-                  />
-                </div>
-              </TabsContent>
-            </Tabs>
+            {renderFormDialogContent(true)}
 
             <DialogFooter>
               <Button variant="outline" onClick={() => {
@@ -1279,7 +1666,7 @@ export default function XrayManage() {
 
         {/* 分享链接对话框 */}
         <Dialog open={shareLinkDialogOpen} onOpenChange={setShareLinkDialogOpen}>
-          <DialogContent className="bg-card/95 backdrop-blur-xl border-white/10">
+          <DialogContent className="bg-card/95 backdrop-blur-xl border-white/10 max-w-lg">
             <DialogHeader>
               <DialogTitle>分享链接</DialogTitle>
               <DialogDescription>
@@ -1299,25 +1686,44 @@ export default function XrayManage() {
                     readOnly
                     value={useMemo(() => {
                       if (!selectedShareInbound) return "";
-                      
-                      // 尝试通过node_id匹配（仅当node_id > 0时）
-                      let node = selectedShareInbound.node_id && selectedShareInbound.node_id > 0
-                        ? allNodes.find(n => n.id === selectedShareInbound.node_id)
-                        : undefined;
-                      
-                      // 如果没有找到，尝试使用listen地址匹配
-                      if (!node && selectedShareInbound.listen) {
-                        node = allNodes.find(n => n.host === selectedShareInbound.listen);
-                      }
-                      return generateShareLink(selectedShareInbound, node);
-                    }, [selectedShareInbound, allNodes])}
-                    className="font-mono text-sm"
+                      const node = findNodeForInbound(selectedShareInbound);
+                      return node ? generateShareLink(selectedShareInbound, node) : "";
+                    }, [selectedShareInbound, allNodes, findNodeForInbound])}
+                    className="font-mono text-xs"
                   />
-                  <Button onClick={handleCopyShareLink} size="icon">
+                  <Button onClick={handleCopyShareLink} size="icon" className="shrink-0">
                     <Copy className="w-4 h-4" />
                   </Button>
                 </div>
               </div>
+              
+              {/* 显示关键配置信息 */}
+              {selectedShareInbound && (
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">配置详情</Label>
+                  <div className="bg-black/20 rounded-lg p-3 text-xs font-mono space-y-1">
+                    <div><span className="text-muted-foreground">协议:</span> {selectedShareInbound.protocol.toUpperCase()}</div>
+                    <div><span className="text-muted-foreground">端口:</span> {selectedShareInbound.port}</div>
+                    {(() => {
+                      const node = findNodeForInbound(selectedShareInbound);
+                      return node ? <div><span className="text-muted-foreground">节点:</span> {node.name} ({node.host})</div> : null;
+                    })()}
+                    {(() => {
+                      try {
+                        const stream = typeof selectedShareInbound.stream_settings === 'string'
+                          ? JSON.parse(selectedShareInbound.stream_settings)
+                          : selectedShareInbound.stream_settings;
+                        return (
+                          <>
+                            <div><span className="text-muted-foreground">传输:</span> {stream?.network || "tcp"}</div>
+                            <div><span className="text-muted-foreground">安全:</span> {stream?.security || "none"}</div>
+                          </>
+                        );
+                      } catch { return null; }
+                    })()}
+                  </div>
+                </div>
+              )}
             </div>
             <DialogFooter>
               <Button onClick={() => setShareLinkDialogOpen(false)}>关闭</Button>

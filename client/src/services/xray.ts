@@ -4,6 +4,7 @@ import axios from "axios";
 export interface XrayInbound {
   id: number;
   user_id: number;
+  node_id: number;
   remark: string;
   port: number;
   protocol: string;
@@ -43,6 +44,7 @@ export interface CreateInboundRequest {
   port: number;
   protocol: string;
   listen?: string;
+  node_id?: number;
   settings?: string;
   stream_settings?: string;
   sniffing?: string;
@@ -68,6 +70,7 @@ export interface XrayStats {
 function normalizeInbound(inbound: any): XrayInbound {
   return {
     ...inbound,
+    node_id: inbound.node_id ?? 0,
     enable: inbound.enable ?? inbound.enabled ?? true,
     enabled: inbound.enable ?? inbound.enabled ?? true,
   };
