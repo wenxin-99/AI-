@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # UniProxy Panel 一键安装脚本
-# 支持 Ubuntu 20.04/22.04, Debian 10/11, CentOS 7/8
+# 支持 Ubuntu 20.04/22.04/24.04, Debian 10/11, CentOS 7/8
 
 set -e
 
@@ -29,11 +29,16 @@ log_step() {
     echo -e "${BLUE}[STEP]${NC} $1"
 }
 
+# 错误处理
+error_exit() {
+    log_error "$1"
+    exit 1
+}
+
 # 检查是否为root用户
 check_root() {
     if [[ $EUID -ne 0 ]]; then
-        log_error "此脚本必须以root权限运行"
-        exit 1
+        error_exit "此脚本必须以root权限运行"
     fi
 }
 
@@ -44,11 +49,25 @@ detect_os() {
         OS=$ID
         VER=$VERSION_ID
     else
-        log_error "无法检测操作系统"
-        exit 1
+        error_exit "无法检测操作系统"
     fi
     
     log_info "检测到操作系统: $OS $VER"
+}
+
+# 禁用IPv6(解决某些VPS的IPv6连接问题)
+disable_ipv6_if_needed() {
+    log_step "检查网络配置..."
+    
+    # 测试IPv6连接
+    if ping6 -c 1 google.com &> /dev/null; then
+        log_info "IPv6连接正常"
+    else
+        log_warn "IPv6连接失败,优先使用IPv4"
+        # 临时禁用IPv6
+        sysctl -w net.ipv6.conf.all.disable_ipv6=1 &> /dev/null || true
+        sysctl -w net.ipv6.conf.default.disable_ipv6=1 &> /dev/null || true
+    fi
 }
 
 # 安装依赖
@@ -56,13 +75,13 @@ install_dependencies() {
     log_step "安装系统依赖..."
     
     if [[ "$OS" == "ubuntu" ]] || [[ "$OS" == "debian" ]]; then
-        apt-get update
-        apt-get install -y curl wget git unzip sqlite3 nginx
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update || error_exit "apt-get update 失败"
+        apt-get install -y curl wget git unzip sqlite3 nginx || error_exit "依赖安装失败"
     elif [[ "$OS" == "centos" ]] || [[ "$OS" == "rhel" ]]; then
-        yum install -y curl wget git unzip sqlite nginx
+        yum install -y curl wget git unzip sqlite nginx || error_exit "依赖安装失败"
     else
-        log_error "不支持的操作系统: $OS"
-        exit 1
+        error_exit "不支持的操作系统: $OS"
     fi
 }
 
@@ -74,15 +93,34 @@ install_nodejs() {
         NODE_VERSION=$(node -v)
         log_info "Node.js 已安装: $NODE_VERSION"
     else
-        curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
-        apt-get install -y nodejs
+        log_info "正在安装 Node.js 20.x..."
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash - || error_exit "Node.js 安装失败"
+        apt-get install -y nodejs || error_exit "Node.js 安装失败"
         log_info "Node.js 安装完成: $(node -v)"
     fi
     
-    # 安装 pnpm
+    # 安装 pnpm (带重试)
     if ! command -v pnpm &> /dev/null; then
-        npm install -g pnpm
-        log_info "pnpm 安装完成"
+        log_info "正在安装 pnpm..."
+        local retry=0
+        local max_retry=3
+        
+        while [ $retry -lt $max_retry ]; do
+            if npm install -g pnpm; then
+                log_info "pnpm 安装完成"
+                break
+            else
+                retry=$((retry + 1))
+                if [ $retry -lt $max_retry ]; then
+                    log_warn "pnpm 安装失败,重试 $retry/$max_retry..."
+                    sleep 2
+                else
+                    error_exit "pnpm 安装失败,请检查网络连接"
+                fi
+            fi
+        done
+    else
+        log_info "pnpm 已安装"
     fi
 }
 
@@ -97,9 +135,28 @@ install_golang() {
     fi
     
     GO_VERSION="1.21.5"
-    wget https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
+    log_info "正在下载 Go ${GO_VERSION}..."
+    
+    # 带重试的下载
+    local retry=0
+    local max_retry=3
+    
+    while [ $retry -lt $max_retry ]; do
+        if wget -O go${GO_VERSION}.linux-amd64.tar.gz https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz; then
+            break
+        else
+            retry=$((retry + 1))
+            if [ $retry -lt $max_retry ]; then
+                log_warn "Go 下载失败,重试 $retry/$max_retry..."
+                sleep 2
+            else
+                error_exit "Go 下载失败"
+            fi
+        fi
+    done
+    
     rm -rf /usr/local/go
-    tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
+    tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz || error_exit "Go 解压失败"
     rm go${GO_VERSION}.linux-amd64.tar.gz
     
     # 设置环境变量
@@ -116,9 +173,27 @@ install_xray() {
     XRAY_DIR="/usr/local/xray"
     mkdir -p $XRAY_DIR
     
-    # 下载最新版本
-    wget -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
-    unzip -o /tmp/xray.zip -d $XRAY_DIR
+    log_info "正在下载 Xray..."
+    
+    # 带重试的下载
+    local retry=0
+    local max_retry=3
+    
+    while [ $retry -lt $max_retry ]; do
+        if wget -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip; then
+            break
+        else
+            retry=$((retry + 1))
+            if [ $retry -lt $max_retry ]; then
+                log_warn "Xray 下载失败,重试 $retry/$max_retry..."
+                sleep 2
+            else
+                error_exit "Xray 下载失败"
+            fi
+        fi
+    done
+    
+    unzip -o /tmp/xray.zip -d $XRAY_DIR || error_exit "Xray 解压失败"
     chmod +x $XRAY_DIR/xray
     rm /tmp/xray.zip
     
@@ -134,8 +209,27 @@ install_gost() {
     
     # 使用固定版本3.0.0-rc10 (最新稳定版)
     GOST_VERSION="3.0.0-rc10"
-    wget -O /tmp/gost.tar.gz https://github.com/go-gost/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_amd64.tar.gz
-    tar -xzf /tmp/gost.tar.gz -C $GOST_DIR
+    log_info "正在下载 Gost ${GOST_VERSION}..."
+    
+    # 带重试的下载
+    local retry=0
+    local max_retry=3
+    
+    while [ $retry -lt $max_retry ]; do
+        if wget -O /tmp/gost.tar.gz https://github.com/go-gost/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_amd64.tar.gz; then
+            break
+        else
+            retry=$((retry + 1))
+            if [ $retry -lt $max_retry ]; then
+                log_warn "Gost 下载失败,重试 $retry/$max_retry..."
+                sleep 2
+            else
+                error_exit "Gost 下载失败"
+            fi
+        fi
+    done
+    
+    tar -xzf /tmp/gost.tar.gz -C $GOST_DIR || error_exit "Gost 解压失败"
     chmod +x $GOST_DIR/gost
     rm /tmp/gost.tar.gz
     
@@ -154,23 +248,44 @@ clone_project() {
     fi
     
     # 克隆代码(包含前端和后端)
-    git clone https://github.com/wenxin-99/AI-.git $INSTALL_DIR
+    log_info "正在从GitHub克隆代码..."
     
-    log_info "项目代码克隆完成"
+    local retry=0
+    local max_retry=3
+    
+    while [ $retry -lt $max_retry ]; do
+        if git clone https://github.com/wenxin-99/AI-.git $INSTALL_DIR; then
+            log_info "项目代码克隆完成"
+            return
+        else
+            retry=$((retry + 1))
+            if [ $retry -lt $max_retry ]; then
+                log_warn "代码克隆失败,重试 $retry/$max_retry..."
+                rm -rf $INSTALL_DIR
+                sleep 2
+            else
+                error_exit "代码克隆失败,请检查网络连接"
+            fi
+        fi
+    done
 }
 
 # 构建前端
 build_frontend() {
     log_step "构建前端..."
     
-    cd /opt/uniproxy-panel
-    pnpm install
-    pnpm build
+    cd /opt/uniproxy-panel || error_exit "无法进入项目目录"
+    
+    log_info "正在安装前端依赖..."
+    pnpm install || error_exit "前端依赖安装失败"
+    
+    log_info "正在构建前端..."
+    pnpm build || error_exit "前端构建失败"
     
     # 复制构建产物到nginx目录
     rm -rf /var/www/uniproxy-panel
     mkdir -p /var/www/uniproxy-panel
-    cp -r dist/* /var/www/uniproxy-panel/
+    cp -r dist/* /var/www/uniproxy-panel/ || error_exit "前端部署失败"
     
     log_info "前端构建完成"
 }
@@ -180,17 +295,16 @@ build_backend() {
     log_step "构建后端..."
     
     if [[ ! -d "/opt/uniproxy-panel/backend" ]]; then
-        log_error "后端代码不存在"
-        exit 1
+        error_exit "后端代码不存在"
     fi
     
-    cd /opt/uniproxy-panel/backend
+    cd /opt/uniproxy-panel/backend || error_exit "无法进入后端目录"
     
-    # 下载依赖
-    go mod download
+    log_info "正在下载后端依赖..."
+    go mod download || error_exit "后端依赖下载失败"
     
-    # 构建
-    go build -o uniproxy ./cmd/main.go
+    log_info "正在编译后端..."
+    go build -o uniproxy ./cmd/main.go || error_exit "后端编译失败"
     
     log_info "后端构建完成"
 }
@@ -230,7 +344,8 @@ server {
 EOF
     
     ln -sf /etc/nginx/sites-available/uniproxy-panel /etc/nginx/sites-enabled/
-    nginx -t && systemctl reload nginx
+    nginx -t || error_exit "Nginx 配置测试失败"
+    systemctl reload nginx || error_exit "Nginx 重载失败"
     
     log_info "Nginx 配置完成"
 }
@@ -242,6 +357,10 @@ create_config() {
     mkdir -p /opt/uniproxy-panel/data
     mkdir -p /opt/uniproxy-panel/logs
     mkdir -p /opt/uniproxy-panel/certs
+    
+    # 生成随机密码
+    ADMIN_PASSWORD=$(openssl rand -base64 12)
+    JWT_SECRET=$(openssl rand -base64 32)
     
     cat > /opt/uniproxy-panel/config.yaml <<EOF
 server:
@@ -264,9 +383,9 @@ gost:
   log_path: /opt/uniproxy-panel/logs/gost.log
 
 security:
-  jwt_secret: $(openssl rand -base64 32)
+  jwt_secret: $JWT_SECRET
   admin_username: admin
-  admin_password: $(openssl rand -base64 12)
+  admin_password: $ADMIN_PASSWORD
 
 log:
   level: info
@@ -307,11 +426,13 @@ EOF
 start_services() {
     log_step "启动服务..."
     
-    systemctl start nginx
+    # 启动Nginx
+    systemctl start nginx || true
     systemctl enable nginx
     
+    # 启动后端
     if [[ -f "/opt/uniproxy-panel/backend/uniproxy" ]]; then
-        systemctl start uniproxy-panel
+        systemctl start uniproxy-panel || error_exit "后端服务启动失败"
         log_info "后端服务已启动"
     else
         log_warn "后端未构建,跳过启动"
@@ -320,12 +441,15 @@ start_services() {
 
 # 显示安装信息
 show_info() {
+    # 获取公网IP
+    PUBLIC_IP=$(curl -s ifconfig.me || curl -s icanhazip.com || echo "无法获取")
+    
     echo ""
     echo "=========================================="
     log_info "UniProxy Panel 安装完成!"
     echo "=========================================="
     echo ""
-    echo "访问地址: http://$(curl -s ifconfig.me)"
+    echo "访问地址: http://${PUBLIC_IP}"
     echo ""
     
     if [[ -f "/opt/uniproxy-panel/config.yaml" ]]; then
@@ -333,6 +457,8 @@ show_info() {
         ADMIN_PASS=$(grep admin_password /opt/uniproxy-panel/config.yaml | awk '{print $2}')
         echo "管理员账号: $ADMIN_USER"
         echo "管理员密码: $ADMIN_PASS"
+        echo ""
+        log_warn "请立即修改默认密码!"
         echo ""
     fi
     
@@ -360,6 +486,7 @@ main() {
     
     check_root
     detect_os
+    disable_ipv6_if_needed
     install_dependencies
     install_nodejs
     install_golang
