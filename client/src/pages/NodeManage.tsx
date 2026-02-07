@@ -103,18 +103,22 @@ export default function NodeManage() {
 
   const handleSubmit = async () => {
     try {
+      console.log('提交表单数据:', formData);
       if (editingNode) {
-        await nodeService.update(editingNode.id, formData);
+        const response = await nodeService.update(editingNode.id, formData);
+        console.log('更新响应:', response);
         toast.success("节点更新成功");
       } else {
-        await nodeService.create(formData);
+        const response = await nodeService.create(formData);
+        console.log('创建响应:', response);
         toast.success("节点创建成功");
       }
       setDialogOpen(false);
       loadNodes();
-    } catch (error) {
+    } catch (error: any) {
       console.error("保存节点失败:", error);
-      toast.error("保存节点失败");
+      console.error("错误详情:", error.response?.data || error.message);
+      toast.error(error.response?.data?.message || "保存节点失败");
     }
   };
 
