@@ -441,7 +441,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=/opt/uniproxy-panel/backend
-ExecStart=/opt/uniproxy-panel/backend/uniproxy -c /opt/uniproxy-panel/config.yaml
+ExecStart=/opt/uniproxy-panel/backend/uniproxy -config /opt/uniproxy-panel/config.yaml
 Restart=on-failure
 RestartSec=5s
 
