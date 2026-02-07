@@ -279,7 +279,7 @@ build_frontend() {
     # 创建前端环境变量配置
     log_info "配置前端API地址..."
     cat > .env.production <<'EOF'
-VITE_API_URL=/api/v1
+VITE_API_URL=/api
 EOF
     
     log_info "正在安装前端依赖..."
