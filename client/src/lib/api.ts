@@ -2,7 +2,7 @@ import axios, { AxiosInstance, AxiosError } from "axios";
 import { toast } from "sonner";
 
 // API base URL - 根据环境自动选择
-const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:2053/api/v1";
+const API_BASE_URL = import.meta.env.VITE_API_URL || "";
 
 // 创建 axios 实例
 const api: AxiosInstance = axios.create({
