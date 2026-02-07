@@ -55,11 +55,7 @@ export default function Certificates() {
       const response = await api.get('/certificates');
       setCertificates(response.data.certificates || []);
     } catch (error) {
-      toast({
-        title: '获取证书列表失败',
-        description: error instanceof Error ? error.message : '未知错误',
-        variant: 'destructive',
-      });
+      toast.error(`获取证书列表失败: ${error instanceof Error ? error.message : '未知错误'}`);
     } finally {
       setLoading(false);
     }
@@ -67,53 +63,35 @@ export default function Certificates() {
 
   const handleUpload = async () => {
     if (!uploadForm.name || !uploadForm.cert_data || !uploadForm.key_data) {
-      toast({
-        title: '请填写完整信息',
-        variant: 'destructive',
-      });
+      toast.error('请填写完整信息');
       return;
     }
 
     try {
       await api.post('/certificates/upload', uploadForm);
-      toast({
-        title: '证书上传成功',
-      });
+      toast.success('证书上传成功');
       setUploadDialogOpen(false);
       setUploadForm({ name: '', cert_data: '', key_data: '' });
       fetchCertificates();
     } catch (error) {
-      toast({
-        title: '上传失败',
-        description: error instanceof Error ? error.message : '未知错误',
-        variant: 'destructive',
-      });
+      toast.error(`上传失败: ${error instanceof Error ? error.message : '未知错误'}`);
     }
   };
 
   const handleGenerate = async () => {
     if (!generateForm.name || !generateForm.domain) {
-      toast({
-        title: '请填写完整信息',
-        variant: 'destructive',
-      });
+      toast.error('请填写完整信息');
       return;
     }
 
     try {
       await api.post('/certificates/generate', generateForm);
-      toast({
-        title: '自签名证书生成成功',
-      });
+      toast.success('自签名证书生成成功');
       setGenerateDialogOpen(false);
       setGenerateForm({ name: '', domain: '' });
       fetchCertificates();
     } catch (error) {
-      toast({
-        title: '生成失败',
-        description: error instanceof Error ? error.message : '未知错误',
-        variant: 'destructive',
-      });
+      toast.error(`生成失败: ${error instanceof Error ? error.message : '未知错误'}`);
     }
   };
 
@@ -122,16 +100,10 @@ export default function Certificates() {
 
     try {
       await api.delete(`/certificates/${id}`);
-      toast({
-        title: '证书删除成功',
-      });
+      toast.success('证书删除成功');
       fetchCertificates();
     } catch (error) {
-      toast({
-        title: '删除失败',
-        description: error instanceof Error ? error.message : '未知错误',
-        variant: 'destructive',
-      });
+      toast.error(`删除失败: ${error instanceof Error ? error.message : '未知错误'}`);
     }
   };
 
