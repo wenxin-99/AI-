@@ -13,6 +13,7 @@ import GostManage from "./pages/GostManage";
 import TrafficStats from "./pages/TrafficStats";
 import SubscriptionManage from "./pages/SubscriptionManage";
 import NodeManage from "./pages/NodeManage";
+import BBROptimize from "./pages/BBROptimize";
 
 
 function Router() {
@@ -27,6 +28,7 @@ function Router() {
       <Route path={"/traffic"} component={TrafficStats} />
       <Route path={"/subscription"} component={SubscriptionManage} />
       <Route path={"/nodes"} component={NodeManage} />
+      <Route path={"/bbr"} component={BBROptimize} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
