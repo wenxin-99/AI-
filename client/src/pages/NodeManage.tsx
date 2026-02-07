@@ -461,49 +461,48 @@ export default function NodeManage() {
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <div className="flex items-center justify-between mb-2">
-                <Label className="text-white/90">安装命令</Label>
-                <div
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    console.log('复制按钮被点击');
-                    
-                    const script = `PANEL_URL=${window.location.origin} API_TOKEN=your-token bash <(curl -fsSL ${window.location.origin}/node-install.sh)`;
-                    console.log('要复制的内容:', script);
-                    
-                    // 使用传统方法
-                    const textarea = document.createElement('textarea');
-                    textarea.value = script;
-                    textarea.style.position = 'fixed';
-                    textarea.style.left = '-9999px';
-                    textarea.style.top = '0';
-                    document.body.appendChild(textarea);
-                    textarea.focus();
-                    textarea.select();
-                    
-                    try {
-                      const successful = document.execCommand('copy');
-                      console.log('复制结果:', successful);
-                      if (successful) {
-                        toast.success('已复制到剪贴板');
-                      } else {
-                        toast.error('复制失败');
-                      }
-                    } catch (err) {
-                      console.error('复制错误:', err);
-                      toast.error('复制失败: ' + err.message);
-                    }
-                    
-                    document.body.removeChild(textarea);
-                  }}
-                  className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium border border-white/20 rounded-md hover:bg-cyan-500/20 cursor-pointer transition-colors"
-                  style={{ pointerEvents: 'auto', userSelect: 'none' }}
-                >
-                  <Copy className="w-4 h-4 mr-1" />
-                  复制
-                </div>
+                <Label className="text-white/90">安装命令（点击下方命令框复制）</Label>
               </div>
-              <div className="bg-black/40 border border-white/10 rounded-lg p-4 font-mono text-sm text-cyan-400 overflow-x-auto">
+              <div 
+                className="bg-black/40 border border-white/10 rounded-lg p-4 font-mono text-sm text-cyan-400 overflow-x-auto cursor-pointer hover:border-cyan-500/50 transition-colors relative group"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  console.log('命令框被点击');
+                  
+                  const script = `PANEL_URL=${window.location.origin} API_TOKEN=your-token bash <(curl -fsSL ${window.location.origin}/node-install.sh)`;
+                  console.log('要复制的内容:', script);
+                  
+                  // 使用传统方法
+                  const textarea = document.createElement('textarea');
+                  textarea.value = script;
+                  textarea.style.position = 'fixed';
+                  textarea.style.left = '-9999px';
+                  textarea.style.top = '0';
+                  document.body.appendChild(textarea);
+                  textarea.focus();
+                  textarea.select();
+                  
+                  try {
+                    const successful = document.execCommand('copy');
+                    console.log('复制结果:', successful);
+                    if (successful) {
+                      toast.success('已复制到剪贴板');
+                    } else {
+                      toast.error('复制失败');
+                    }
+                  } catch (err) {
+                    console.error('复制错误:', err);
+                    toast.error('复制失败: ' + err.message);
+                  }
+                  
+                  document.body.removeChild(textarea);
+                }}
+                title="点击复制"
+              >
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Copy className="w-4 h-4 text-cyan-400" />
+                </div>
                 <pre className="whitespace-pre-wrap break-all">
 PANEL_URL={window.location.origin} API_TOKEN=your-token bash &lt;(curl -fsSL {window.location.origin}/node-install.sh)
                 </pre>
