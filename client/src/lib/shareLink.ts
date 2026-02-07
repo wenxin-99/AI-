@@ -6,12 +6,20 @@ import type { Node } from "@/services/node";
  */
 export function generateShareLink(inbound: XrayInbound, node: Node | undefined): string {
   if (!node) {
+    console.error("generateShareLink: node is undefined");
     return "";
   }
 
   const protocol = inbound.protocol.toLowerCase();
-  const address = node.host || node.ip;
+  const address = node.host;
   const port = inbound.port;
+  
+  if (!address) {
+    console.error("generateShareLink: node.host is empty", node);
+    return "";
+  }
+  
+  console.log("Generating share link:", { protocol, address, port, node, inbound });
 
   try {
     // 解析stream_settings获取传输层配置

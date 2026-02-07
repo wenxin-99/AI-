@@ -461,9 +461,26 @@ export default function XrayManage() {
   const handleOpenShareLink = async (inbound: XrayInbound) => {
     setSelectedShareInbound(inbound);
     
-    // 获取入站对应的节点
-    const node = allNodes.find(n => n.id.toString() === inbound.node_id?.toString());
-    const shareLink = generateShareLink(inbound, node);
+    // Xray入站没有node_id，使用listen地址作为节点地址
+    // 创建一个临时node对象
+    const tempNode: Node = {
+      id: 0,
+      name: inbound.remark || '入站',
+      host: inbound.listen || '127.0.0.1',
+      port: 0,
+      status: 'online',
+      type: 'xray',
+      api_token: '',
+      cpu_usage: 0,
+      memory_usage: 0,
+      traffic_up: 0,
+      traffic_down: 0,
+      last_heartbeat: '',
+      created_at: '',
+      updated_at: ''
+    };
+    
+    const shareLink = generateShareLink(inbound, tempNode);
     
     if (!shareLink) {
       toast.error("无法生成分享链接，请检查节点配置");
