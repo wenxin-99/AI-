@@ -462,37 +462,46 @@ export default function NodeManage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between mb-2">
                 <Label className="text-white/90">安装命令</Label>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={async () => {
+                <div
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('复制按钮被点击');
+                    
                     const script = `PANEL_URL=${window.location.origin} API_TOKEN=your-token bash <(curl -fsSL ${window.location.origin}/node-install.sh)`;
+                    console.log('要复制的内容:', script);
+                    
+                    // 使用传统方法
+                    const textarea = document.createElement('textarea');
+                    textarea.value = script;
+                    textarea.style.position = 'fixed';
+                    textarea.style.left = '-9999px';
+                    textarea.style.top = '0';
+                    document.body.appendChild(textarea);
+                    textarea.focus();
+                    textarea.select();
+                    
                     try {
-                      // 尝试使用Clipboard API
-                      await navigator.clipboard.writeText(script);
-                      toast.success('已复制到剪贴板');
-                    } catch (err) {
-                      // Fallback: 使用传统方法
-                      const textarea = document.createElement('textarea');
-                      textarea.value = script;
-                      textarea.style.position = 'fixed';
-                      textarea.style.opacity = '0';
-                      document.body.appendChild(textarea);
-                      textarea.select();
-                      try {
-                        document.execCommand('copy');
+                      const successful = document.execCommand('copy');
+                      console.log('复制结果:', successful);
+                      if (successful) {
                         toast.success('已复制到剪贴板');
-                      } catch (e) {
-                        toast.error('复制失败,请手动复制');
+                      } else {
+                        toast.error('复制失败');
                       }
-                      document.body.removeChild(textarea);
+                    } catch (err) {
+                      console.error('复制错误:', err);
+                      toast.error('复制失败: ' + err.message);
                     }
+                    
+                    document.body.removeChild(textarea);
                   }}
-                  className="border-white/20 hover:bg-cyan-500/20"
+                  className="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium border border-white/20 rounded-md hover:bg-cyan-500/20 cursor-pointer transition-colors"
+                  style={{ pointerEvents: 'auto', userSelect: 'none' }}
                 >
                   <Copy className="w-4 h-4 mr-1" />
                   复制
-                </Button>
+                </div>
               </div>
               <div className="bg-black/40 border border-white/10 rounded-lg p-4 font-mono text-sm text-cyan-400 overflow-x-auto">
                 <pre className="whitespace-pre-wrap break-all">
