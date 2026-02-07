@@ -1,194 +1,289 @@
 import DashboardLayout from "@/components/DashboardLayout";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Bar, BarChart, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { ArrowUp, ArrowDown, Activity } from "lucide-react";
-
-const dailyTraffic = [
-  { date: "01-01", upload: 120, download: 380 },
-  { date: "01-02", upload: 150, download: 420 },
-  { date: "01-03", upload: 180, download: 480 },
-  { date: "01-04", upload: 140, download: 390 },
-  { date: "01-05", upload: 200, download: 520 },
-  { date: "01-06", upload: 170, download: 460 },
-  { date: "01-07", upload: 190, download: 500 },
-];
-
-const topUsers = [
-  { name: "user001", upload: 45.2, download: 128.5, total: 173.7 },
-  { name: "user002", upload: 38.6, download: 112.3, total: 150.9 },
-  { name: "user003", upload: 32.1, download: 98.7, total: 130.8 },
-  { name: "user004", upload: 28.4, download: 85.2, total: 113.6 },
-  { name: "user005", upload: 24.7, download: 76.8, total: 101.5 },
-];
-
-const inboundTraffic = [
-  { name: "VMess 主节点", traffic: 1200 },
-  { name: "VLESS Reality", traffic: 856 },
-  { name: "Trojan TLS", traffic: 542 },
-];
+import { trafficService } from "@/services/traffic";
+import { toast } from "sonner";
 
 export default function TrafficStats() {
+  const [loading, setLoading] = useState(true);
+  const [days, setDays] = useState(7);
+  const [systemTraffic, setSystemTraffic] = useState<any>(null);
+  const [trafficTrend, setTrafficTrend] = useState<any[]>([]);
+
+  useEffect(() => {
+    fetchTrafficData();
+  }, [days]);
+
+  const fetchTrafficData = async () => {
+    try {
+      setLoading(true);
+      const [sysTraffic, trend] = await Promise.all([
+        trafficService.getSystemTraffic(),
+        trafficService.getTrafficTrend(days),
+      ]);
+      setSystemTraffic(sysTraffic);
+      setTrafficTrend(trend);
+    } catch (error) {
+      console.error("Failed to fetch traffic data:", error);
+      toast.error("获取流量数据失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 格式化流量数据
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB", "TB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
+  };
+
+  // 转换趋势数据为图表格式
+  const chartData = trafficTrend.map((item) => ({
+    date: new Date(item.date).toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" }),
+    upload: Math.round(item.upload / 1024 / 1024), // MB
+    download: Math.round(item.download / 1024 / 1024), // MB
+  }));
+
+  // 模拟TOP用户数据 (TODO: 从API获取)
+  const topUsers = [
+    { name: "user001", upload: 45.2, download: 128.5, total: 173.7 },
+    { name: "user002", upload: 38.6, download: 112.3, total: 150.9 },
+    { name: "user003", upload: 32.1, download: 98.7, total: 130.8 },
+  ];
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
         {/* Page header */}
-        <div>
-          <h1 className="text-3xl font-bold text-white mb-2">流量统计</h1>
-          <p className="text-white/60">查看系统流量使用情况和趋势分析</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
+              流量统计
+            </h1>
+            <p className="text-muted-foreground mt-2">
+              查看系统流量使用情况和趋势分析
+            </p>
+          </div>
+          <Select value={days.toString()} onValueChange={(v) => setDays(parseInt(v))}>
+            <SelectTrigger className="w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="7">最近7天</SelectItem>
+              <SelectItem value="30">最近30天</SelectItem>
+              <SelectItem value="90">最近90天</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Summary cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="glass-card border-white/20 p-6">
+          <Card className="p-6 bg-card/40 backdrop-blur-xl border-white/10">
             <div className="flex items-center justify-between mb-4">
               <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center">
                 <ArrowUp className="w-6 h-6 text-white" />
               </div>
               <span className="text-green-400 text-sm">+12%</span>
             </div>
-            <p className="text-white/60 text-sm mb-1">总上传</p>
-            <p className="text-3xl font-bold text-white">1.2 TB</p>
+            <p className="text-sm text-muted-foreground mb-1">总上传</p>
+            <p className="text-3xl font-bold">
+              {formatBytes(systemTraffic?.upload || 0)}
+            </p>
           </Card>
-          <Card className="glass-card border-white/20 p-6">
+
+          <Card className="p-6 bg-card/40 backdrop-blur-xl border-white/10">
             <div className="flex items-center justify-between mb-4">
               <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center">
                 <ArrowDown className="w-6 h-6 text-white" />
               </div>
               <span className="text-green-400 text-sm">+18%</span>
             </div>
-            <p className="text-white/60 text-sm mb-1">总下载</p>
-            <p className="text-3xl font-bold text-white">3.4 TB</p>
+            <p className="text-sm text-muted-foreground mb-1">总下载</p>
+            <p className="text-3xl font-bold">
+              {formatBytes(systemTraffic?.download || 0)}
+            </p>
           </Card>
-          <Card className="glass-card border-white/20 p-6">
+
+          <Card className="p-6 bg-card/40 backdrop-blur-xl border-white/10">
             <div className="flex items-center justify-between mb-4">
               <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-400 to-cyan-500 flex items-center justify-center">
                 <Activity className="w-6 h-6 text-white" />
               </div>
               <span className="text-green-400 text-sm">+15%</span>
             </div>
-            <p className="text-white/60 text-sm mb-1">总流量</p>
-            <p className="text-3xl font-bold text-white">4.6 TB</p>
+            <p className="text-sm text-muted-foreground mb-1">总流量</p>
+            <p className="text-3xl font-bold">
+              {formatBytes(systemTraffic?.total || 0)}
+            </p>
           </Card>
         </div>
 
-        {/* Daily traffic trend */}
-        <Card className="glass-card border-white/20 p-6">
+        {/* Daily traffic chart */}
+        <Card className="p-6 bg-card/40 backdrop-blur-xl border-white/10">
           <div className="mb-6">
-            <h2 className="text-xl font-bold text-white mb-2">每日流量趋势</h2>
-            <p className="text-white/60 text-sm">过去7天的流量统计</p>
+            <h2 className="text-xl font-semibold">每日流量趋势</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              最近{days}天的流量使用情况 (单位: MB)
+            </p>
           </div>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={dailyTraffic}>
+          {loading ? (
+            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+              加载中...
+            </div>
+          ) : chartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={chartData}>
                 <XAxis
                   dataKey="date"
-                  stroke="rgba(255,255,255,0.3)"
-                  tick={{ fill: "rgba(255,255,255,0.6)" }}
+                  stroke="#888888"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
                 />
                 <YAxis
-                  stroke="rgba(255,255,255,0.3)"
-                  tick={{ fill: "rgba(255,255,255,0.6)" }}
+                  stroke="#888888"
+                  fontSize={12}
+                  tickLine={false}
+                  axisLine={false}
+                  tickFormatter={(value) => `${value}MB`}
                 />
                 <Tooltip
                   contentStyle={{
-                    backgroundColor: "rgba(15, 23, 42, 0.9)",
-                    border: "1px solid rgba(255,255,255,0.2)",
-                    borderRadius: "0.5rem",
-                    color: "#fff",
+                    backgroundColor: "rgba(0, 0, 0, 0.8)",
+                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    borderRadius: "8px",
                   }}
+                  labelStyle={{ color: "#fff" }}
                 />
                 <Line
                   type="monotone"
                   dataKey="upload"
-                  stroke="#06b6d4"
+                  stroke="url(#uploadGradient)"
                   strokeWidth={3}
-                  dot={{ fill: "#06b6d4", r: 4 }}
-                  name="上传 (GB)"
+                  dot={false}
+                  name="上传"
                 />
                 <Line
                   type="monotone"
                   dataKey="download"
-                  stroke="#8b5cf6"
+                  stroke="url(#downloadGradient)"
                   strokeWidth={3}
-                  dot={{ fill: "#8b5cf6", r: 4 }}
-                  name="下载 (GB)"
+                  dot={false}
+                  name="下载"
                 />
+                <defs>
+                  <linearGradient id="uploadGradient" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#06b6d4" />
+                    <stop offset="100%" stopColor="#3b82f6" />
+                  </linearGradient>
+                  <linearGradient id="downloadGradient" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#a855f7" />
+                    <stop offset="100%" stopColor="#ec4899" />
+                  </linearGradient>
+                </defs>
               </LineChart>
             </ResponsiveContainer>
+          ) : (
+            <div className="h-[300px] flex items-center justify-center text-muted-foreground">
+              暂无流量数据
+            </div>
+          )}
+        </Card>
+
+        {/* Top users */}
+        <Card className="p-6 bg-card/40 backdrop-blur-xl border-white/10">
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold">TOP 用户流量</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              流量使用最多的用户排行 (单位: GB)
+            </p>
+          </div>
+          <div className="space-y-4">
+            {topUsers.map((user, index) => (
+              <div
+                key={user.name}
+                className="flex items-center justify-between p-4 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+              >
+                <div className="flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-400 to-purple-500 flex items-center justify-center font-bold text-white">
+                    {index + 1}
+                  </div>
+                  <div>
+                    <p className="font-medium">{user.name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      ↑ {user.upload} GB · ↓ {user.download} GB
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-xl font-bold">{user.total} GB</p>
+                  <p className="text-sm text-muted-foreground">总流量</p>
+                </div>
+              </div>
+            ))}
           </div>
         </Card>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Top users */}
-          <Card className="glass-card border-white/20 p-6">
-            <div className="mb-6">
-              <h2 className="text-xl font-bold text-white mb-2">流量 TOP 5 用户</h2>
-              <p className="text-white/60 text-sm">本月流量使用排行</p>
-            </div>
-            <div className="space-y-4">
-              {topUsers.map((user, index) => (
-                <div key={user.name} className="flex items-center space-x-4">
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-400 to-purple-600 flex items-center justify-center text-white font-bold text-sm">
-                    {index + 1}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-white font-medium">{user.name}</span>
-                      <span className="text-white/70 text-sm">{user.total.toFixed(1)} GB</span>
-                    </div>
-                    <div className="flex items-center space-x-2 text-xs text-white/50">
-                      <span>↑ {user.upload.toFixed(1)} GB</span>
-                      <span>↓ {user.download.toFixed(1)} GB</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          {/* Inbound traffic distribution */}
-          <Card className="glass-card border-white/20 p-6">
-            <div className="mb-6">
-              <h2 className="text-xl font-bold text-white mb-2">入站流量分布</h2>
-              <p className="text-white/60 text-sm">各入站流量使用情况</p>
-            </div>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={inboundTraffic}>
-                  <XAxis
-                    dataKey="name"
-                    stroke="rgba(255,255,255,0.3)"
-                    tick={{ fill: "rgba(255,255,255,0.6)" }}
-                  />
-                  <YAxis
-                    stroke="rgba(255,255,255,0.3)"
-                    tick={{ fill: "rgba(255,255,255,0.6)" }}
-                  />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "rgba(15, 23, 42, 0.9)",
-                      border: "1px solid rgba(255,255,255,0.2)",
-                      borderRadius: "0.5rem",
-                      color: "#fff",
-                    }}
-                  />
-                  <Bar
-                    dataKey="traffic"
-                    fill="url(#colorGradient)"
-                    radius={[8, 8, 0, 0]}
-                    name="流量 (GB)"
-                  />
-                  <defs>
-                    <linearGradient id="colorGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.8} />
-                      <stop offset="100%" stopColor="#8b5cf6" stopOpacity={0.8} />
-                    </linearGradient>
-                  </defs>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
-        </div>
+        {/* Inbound traffic distribution */}
+        <Card className="p-6 bg-card/40 backdrop-blur-xl border-white/10">
+          <div className="mb-6">
+            <h2 className="text-xl font-semibold">入站流量分布</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              各入站节点的流量使用情况 (单位: GB)
+            </p>
+          </div>
+          <ResponsiveContainer width="100%" height={250}>
+            <BarChart
+              data={[
+                { name: "VMess 主节点", traffic: 1200 },
+                { name: "VLESS Reality", traffic: 856 },
+                { name: "Trojan TLS", traffic: 542 },
+              ]}
+            >
+              <XAxis
+                dataKey="name"
+                stroke="#888888"
+                fontSize={12}
+                tickLine={false}
+                axisLine={false}
+              />
+              <YAxis
+                stroke="#888888"
+                fontSize={12}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(value) => `${value}GB`}
+              />
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: "rgba(0, 0, 0, 0.8)",
+                  border: "1px solid rgba(255, 255, 255, 0.1)",
+                  borderRadius: "8px",
+                }}
+                labelStyle={{ color: "#fff" }}
+              />
+              <Bar dataKey="traffic" fill="url(#barGradient)" radius={[8, 8, 0, 0]} />
+              <defs>
+                <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#06b6d4" />
+                  <stop offset="100%" stopColor="#a855f7" />
+                </linearGradient>
+              </defs>
+            </BarChart>
+          </ResponsiveContainer>
+        </Card>
       </div>
     </DashboardLayout>
   );

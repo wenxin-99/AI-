@@ -1,4 +1,5 @@
 import DashboardLayout from "@/components/DashboardLayout";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -10,43 +11,172 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Plus, Play, Pause, Edit, Trash2, GitBranch } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Plus, Play, Pause, Edit, Trash2, GitBranch, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
-
-const tunnels = [
-  {
-    id: 1,
-    name: "HTTP 转发",
-    protocol: "http",
-    localPort: 8080,
-    remoteAddr: "example.com:80",
-    speedLimit: 100,
-    enabled: true,
-  },
-  {
-    id: 2,
-    name: "SOCKS5 代理",
-    protocol: "socks5",
-    localPort: 1080,
-    remoteAddr: "proxy.example.com:1080",
-    speedLimit: 50,
-    enabled: true,
-  },
-  {
-    id: 3,
-    name: "TCP 隧道",
-    protocol: "tcp",
-    localPort: 3306,
-    remoteAddr: "db.example.com:3306",
-    speedLimit: 0,
-    enabled: false,
-  },
-];
+import { gostService, GostTunnel } from "@/services/gost";
 
 export default function GostManage() {
-  const handleAction = (action: string, id: number) => {
-    toast.success(`${action} 操作已执行`);
+  const [tunnels, setTunnels] = useState<GostTunnel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [selectedTunnel, setSelectedTunnel] = useState<GostTunnel | null>(null);
+
+  // 表单状态
+  const [formData, setFormData] = useState({
+    name: "",
+    protocol: "tcp",
+    local_port: "",
+    remote_addr: "",
+    username: "",
+    password: "",
+    speed_limit_upload: "",
+    speed_limit_download: "",
+  });
+
+  useEffect(() => {
+    fetchTunnels();
+  }, []);
+
+  const fetchTunnels = async () => {
+    try {
+      setLoading(true);
+      const data = await gostService.getTunnels();
+      setTunnels(data);
+    } catch (error) {
+      console.error("Failed to fetch tunnels:", error);
+      toast.error("获取隧道列表失败");
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const handleCreate = async () => {
+    if (!formData.name || !formData.local_port || !formData.remote_addr) {
+      toast.error("请填写完整信息");
+      return;
+    }
+
+    try {
+      await gostService.createTunnel({
+        name: formData.name,
+        protocol: formData.protocol,
+        local_port: parseInt(formData.local_port),
+        remote_addr: formData.remote_addr,
+        username: formData.username || undefined,
+        password: formData.password || undefined,
+        speed_limit_upload: formData.speed_limit_upload ? parseInt(formData.speed_limit_upload) : undefined,
+        speed_limit_download: formData.speed_limit_download ? parseInt(formData.speed_limit_download) : undefined,
+      });
+      toast.success("隧道创建成功");
+      setCreateDialogOpen(false);
+      resetForm();
+      fetchTunnels();
+    } catch (error) {
+      console.error("Failed to create tunnel:", error);
+    }
+  };
+
+  const handleEdit = async () => {
+    if (!selectedTunnel) return;
+
+    try {
+      await gostService.updateTunnel(selectedTunnel.id, {
+        name: formData.name,
+        protocol: formData.protocol,
+        local_port: parseInt(formData.local_port),
+        remote_addr: formData.remote_addr,
+        username: formData.username || undefined,
+        password: formData.password || undefined,
+        speed_limit_upload: formData.speed_limit_upload ? parseInt(formData.speed_limit_upload) : undefined,
+        speed_limit_download: formData.speed_limit_download ? parseInt(formData.speed_limit_download) : undefined,
+      });
+      toast.success("隧道更新成功");
+      setEditDialogOpen(false);
+      setSelectedTunnel(null);
+      fetchTunnels();
+    } catch (error) {
+      console.error("Failed to update tunnel:", error);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!confirm("确定要删除此隧道吗?")) return;
+
+    try {
+      await gostService.deleteTunnel(id);
+      toast.success("隧道删除成功");
+      fetchTunnels();
+    } catch (error) {
+      console.error("Failed to delete tunnel:", error);
+    }
+  };
+
+  const handleToggle = async (id: number, enabled: boolean) => {
+    try {
+      await gostService.toggleTunnel(id, !enabled);
+      toast.success(enabled ? "隧道已禁用" : "隧道已启用");
+      fetchTunnels();
+    } catch (error) {
+      console.error("Failed to toggle tunnel:", error);
+    }
+  };
+
+  const handleRestart = async () => {
+    try {
+      await gostService.restart();
+      toast.success("Gost 服务重启成功");
+    } catch (error) {
+      console.error("Failed to restart Gost:", error);
+    }
+  };
+
+  const resetForm = () => {
+    setFormData({
+      name: "",
+      protocol: "tcp",
+      local_port: "",
+      remote_addr: "",
+      username: "",
+      password: "",
+      speed_limit_upload: "",
+      speed_limit_download: "",
+    });
+  };
+
+  const openEditDialog = (tunnel: GostTunnel) => {
+    setSelectedTunnel(tunnel);
+    setFormData({
+      name: tunnel.name,
+      protocol: tunnel.protocol,
+      local_port: tunnel.local_port.toString(),
+      remote_addr: tunnel.remote_addr,
+      username: tunnel.username || "",
+      password: tunnel.password || "",
+      speed_limit_upload: tunnel.speed_limit_upload?.toString() || "",
+      speed_limit_download: tunnel.speed_limit_download?.toString() || "",
+    });
+    setEditDialogOpen(true);
+  };
+
+  const enabledCount = tunnels.filter(t => t.enabled).length;
 
   return (
     <DashboardLayout>
@@ -54,146 +184,327 @@ export default function GostManage() {
         {/* Page header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-white mb-2">Gost 管理</h1>
-            <p className="text-white/60">管理 Gost 隧道和转发规则</p>
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
+              Gost 管理
+            </h1>
+            <p className="text-muted-foreground mt-2">
+              管理 Gost 隧道和转发规则
+            </p>
           </div>
-          <Button
-            className="bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-600 hover:to-purple-700 text-white shadow-lg shadow-cyan-500/30"
-            onClick={() => toast.info("创建隧道功能开发中")}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            创建隧道
-          </Button>
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              className="border-white/10 hover:bg-white/5"
+              onClick={handleRestart}
+            >
+              <RefreshCw className="w-4 h-4 mr-2" />
+              重启服务
+            </Button>
+            <Button
+              className="bg-gradient-to-r from-cyan-500 to-purple-600 hover:from-cyan-600 hover:to-purple-700 text-white shadow-lg shadow-cyan-500/30"
+              onClick={() => setCreateDialogOpen(true)}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              创建隧道
+            </Button>
+          </div>
         </div>
 
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="glass-card border-white/20 p-6">
+          <Card className="p-6 bg-card/40 backdrop-blur-xl border-white/10">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-white/60 text-sm mb-1">总隧道数</p>
-                <p className="text-3xl font-bold text-white">3</p>
+                <p className="text-sm text-muted-foreground mb-1">总隧道数</p>
+                <p className="text-3xl font-bold">{tunnels.length}</p>
               </div>
               <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center">
                 <GitBranch className="w-6 h-6 text-white" />
               </div>
             </div>
           </Card>
-          <Card className="glass-card border-white/20 p-6">
+
+          <Card className="p-6 bg-card/40 backdrop-blur-xl border-white/10">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-white/60 text-sm mb-1">活跃隧道</p>
-                <p className="text-3xl font-bold text-white">2</p>
+                <p className="text-sm text-muted-foreground mb-1">运行中</p>
+                <p className="text-3xl font-bold">{enabledCount}</p>
               </div>
               <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-green-400 to-cyan-500 flex items-center justify-center">
                 <Play className="w-6 h-6 text-white" />
               </div>
             </div>
           </Card>
-          <Card className="glass-card border-white/20 p-6">
+
+          <Card className="p-6 bg-card/40 backdrop-blur-xl border-white/10">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-white/60 text-sm mb-1">平均速率</p>
-                <p className="text-3xl font-bold text-white">45 MB/s</p>
+                <p className="text-sm text-muted-foreground mb-1">已停止</p>
+                <p className="text-3xl font-bold">{tunnels.length - enabledCount}</p>
               </div>
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center">
-                <Play className="w-6 h-6 text-white" />
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-gray-400 to-gray-500 flex items-center justify-center">
+                <Pause className="w-6 h-6 text-white" />
               </div>
             </div>
           </Card>
         </div>
 
-        {/* Tunnels table */}
-        <Card className="glass-card border-white/20 overflow-hidden">
-          <div className="p-6 border-b border-white/10">
-            <h2 className="text-xl font-bold text-white">隧道列表</h2>
-          </div>
-          <Table>
-            <TableHeader>
-              <TableRow className="border-white/10 hover:bg-white/5">
-                <TableHead className="text-white/70">名称</TableHead>
-                <TableHead className="text-white/70">协议</TableHead>
-                <TableHead className="text-white/70">本地端口</TableHead>
-                <TableHead className="text-white/70">远程地址</TableHead>
-                <TableHead className="text-white/70">限速</TableHead>
-                <TableHead className="text-white/70">状态</TableHead>
-                <TableHead className="text-white/70 text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {tunnels.map((tunnel) => (
-                <TableRow
-                  key={tunnel.id}
-                  className="border-white/10 hover:bg-white/5 transition-colors"
-                >
-                  <TableCell className="font-medium text-white">
-                    {tunnel.name}
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="outline"
-                      className="border-purple-400/50 text-purple-400 bg-purple-400/10"
+        {/* Tunnels Table */}
+        <Card className="bg-card/40 backdrop-blur-xl border-white/10">
+          <div className="p-6">
+            <h2 className="text-xl font-semibold mb-4">隧道列表</h2>
+            {loading ? (
+              <div className="text-center py-8 text-muted-foreground">加载中...</div>
+            ) : tunnels.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                暂无隧道配置,点击"创建隧道"开始
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-white/10 hover:bg-white/5">
+                    <TableHead className="text-white/80">名称</TableHead>
+                    <TableHead className="text-white/80">协议</TableHead>
+                    <TableHead className="text-white/80">本地端口</TableHead>
+                    <TableHead className="text-white/80">远程地址</TableHead>
+                    <TableHead className="text-white/80">限速</TableHead>
+                    <TableHead className="text-white/80">状态</TableHead>
+                    <TableHead className="text-white/80 text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {tunnels.map((tunnel) => (
+                    <TableRow
+                      key={tunnel.id}
+                      className="border-white/10 hover:bg-white/5"
                     >
-                      {tunnel.protocol.toUpperCase()}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-white/70 font-mono">
-                    {tunnel.localPort}
-                  </TableCell>
-                  <TableCell className="text-white/70 font-mono text-sm">
-                    {tunnel.remoteAddr}
-                  </TableCell>
-                  <TableCell className="text-white/70">
-                    {tunnel.speedLimit > 0 ? `${tunnel.speedLimit} MB/s` : "无限制"}
-                  </TableCell>
-                  <TableCell>
-                    {tunnel.enabled ? (
-                      <Badge className="bg-green-500/20 text-green-400 border-green-400/50">
-                        运行中
-                      </Badge>
-                    ) : (
-                      <Badge className="bg-gray-500/20 text-gray-400 border-gray-400/50">
-                        已停止
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end space-x-2">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-white/70 hover:text-white hover:bg-white/10"
-                        onClick={() => handleAction("编辑", tunnel.id)}
-                      >
-                        <Edit className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-white/70 hover:text-white hover:bg-white/10"
-                        onClick={() => handleAction(tunnel.enabled ? "停止" : "启动", tunnel.id)}
-                      >
-                        {tunnel.enabled ? (
-                          <Pause className="w-4 h-4" />
-                        ) : (
-                          <Play className="w-4 h-4" />
-                        )}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                        onClick={() => handleAction("删除", tunnel.id)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                      <TableCell className="font-medium">{tunnel.name}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className="border-purple-500/50 bg-purple-500/10 text-purple-400"
+                        >
+                          {tunnel.protocol.toUpperCase()}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{tunnel.local_port}</TableCell>
+                      <TableCell className="text-muted-foreground font-mono text-sm">
+                        {tunnel.remote_addr}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground text-sm">
+                        {tunnel.speed_limit_upload || tunnel.speed_limit_download
+                          ? `↑${tunnel.speed_limit_upload || 0} ↓${tunnel.speed_limit_download || 0} MB/s`
+                          : "无限制"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={tunnel.enabled ? "default" : "secondary"}
+                          className={
+                            tunnel.enabled
+                              ? "bg-green-500/20 text-green-400 border-green-500/50"
+                              : "bg-gray-500/20 text-gray-400 border-gray-500/50"
+                          }
+                        >
+                          {tunnel.enabled ? "运行中" : "已停止"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleToggle(tunnel.id, tunnel.enabled)}
+                          >
+                            {tunnel.enabled ? (
+                              <Pause className="w-4 h-4" />
+                            ) : (
+                              <Play className="w-4 h-4" />
+                            )}
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openEditDialog(tunnel)}
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDelete(tunnel.id)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
         </Card>
+
+        {/* Create Dialog */}
+        <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+          <DialogContent className="bg-card/95 backdrop-blur-xl border-white/10 max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>创建隧道</DialogTitle>
+              <DialogDescription>
+                配置新的 Gost 转发隧道
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-2 gap-4 py-4">
+              <div className="space-y-2">
+                <Label htmlFor="name">名称</Label>
+                <Input
+                  id="name"
+                  placeholder="例如: HTTP 转发"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="protocol">协议</Label>
+                <Select
+                  value={formData.protocol}
+                  onValueChange={(value) => setFormData({ ...formData, protocol: value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="tcp">TCP</SelectItem>
+                    <SelectItem value="udp">UDP</SelectItem>
+                    <SelectItem value="http">HTTP</SelectItem>
+                    <SelectItem value="https">HTTPS</SelectItem>
+                    <SelectItem value="socks5">SOCKS5</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="local_port">本地端口</Label>
+                <Input
+                  id="local_port"
+                  type="number"
+                  placeholder="例如: 8080"
+                  value={formData.local_port}
+                  onChange={(e) => setFormData({ ...formData, local_port: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="remote_addr">远程地址</Label>
+                <Input
+                  id="remote_addr"
+                  placeholder="例如: example.com:80"
+                  value={formData.remote_addr}
+                  onChange={(e) => setFormData({ ...formData, remote_addr: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="username">用户名 (可选)</Label>
+                <Input
+                  id="username"
+                  value={formData.username}
+                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">密码 (可选)</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="upload">上传限速 (MB/s, 可选)</Label>
+                <Input
+                  id="upload"
+                  type="number"
+                  placeholder="0 = 无限制"
+                  value={formData.speed_limit_upload}
+                  onChange={(e) => setFormData({ ...formData, speed_limit_upload: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="download">下载限速 (MB/s, 可选)</Label>
+                <Input
+                  id="download"
+                  type="number"
+                  placeholder="0 = 无限制"
+                  value={formData.speed_limit_download}
+                  onChange={(e) => setFormData({ ...formData, speed_limit_download: e.target.value })}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
+                取消
+              </Button>
+              <Button onClick={handleCreate}>创建</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Dialog */}
+        <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+          <DialogContent className="bg-card/95 backdrop-blur-xl border-white/10 max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>编辑隧道</DialogTitle>
+              <DialogDescription>
+                修改隧道配置
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-2 gap-4 py-4">
+              <div className="space-y-2">
+                <Label>名称</Label>
+                <Input
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>本地端口</Label>
+                <Input
+                  type="number"
+                  value={formData.local_port}
+                  onChange={(e) => setFormData({ ...formData, local_port: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2 col-span-2">
+                <Label>远程地址</Label>
+                <Input
+                  value={formData.remote_addr}
+                  onChange={(e) => setFormData({ ...formData, remote_addr: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>上传限速 (MB/s)</Label>
+                <Input
+                  type="number"
+                  value={formData.speed_limit_upload}
+                  onChange={(e) => setFormData({ ...formData, speed_limit_upload: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>下载限速 (MB/s)</Label>
+                <Input
+                  type="number"
+                  value={formData.speed_limit_download}
+                  onChange={(e) => setFormData({ ...formData, speed_limit_download: e.target.value })}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+                取消
+              </Button>
+              <Button onClick={handleEdit}>保存</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );
