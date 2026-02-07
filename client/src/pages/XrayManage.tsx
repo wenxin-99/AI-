@@ -30,12 +30,14 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
-import { Plus, Play, Pause, Edit, Trash2, Users, RefreshCw, Shield, AlertCircle } from "lucide-react";
+import { Plus, Play, Pause, Edit, Trash2, Users, RefreshCw, Shield, AlertCircle, Copy, QrCode } from "lucide-react";
 import { toast } from "sonner";
 import { xrayService, type XrayInbound } from "@/services/xray";
 import { nodeService, type Node } from "@/services/node";
 import api from "@/lib/api";
 import LogViewer from "@/components/LogViewer";
+import { generateShareLink, copyToClipboard } from "@/lib/shareLink";
+import QRCode from "qrcode";
 
 interface Certificate {
   id: number;
@@ -91,6 +93,11 @@ export default function XrayManage() {
   // 自签名证书对话框
   const [selfSignedDialogOpen, setSelfSignedDialogOpen] = useState(false);
   const [selfSignedForm, setSelfSignedForm] = useState({ name: "", domain: "" });
+
+  // 分享链接对话框
+  const [shareLinkDialogOpen, setShareLinkDialogOpen] = useState(false);
+  const [selectedShareInbound, setSelectedShareInbound] = useState<XrayInbound | null>(null);
+  const [qrCodeUrl, setQrCodeUrl] = useState<string>("");
 
   const fetchNodes = useCallback(async () => {
     try {
@@ -450,6 +457,58 @@ export default function XrayManage() {
     }
   };
 
+  // 打开分享链接对话框
+  const handleOpenShareLink = async (inbound: XrayInbound) => {
+    setSelectedShareInbound(inbound);
+    
+    // 获取入站对应的节点
+    const node = allNodes.find(n => n.id.toString() === inbound.node_id?.toString());
+    const shareLink = generateShareLink(inbound, node);
+    
+    if (!shareLink) {
+      toast.error("无法生成分享链接，请检查节点配置");
+      return;
+    }
+    
+    // 生成二维码
+    try {
+      const qrUrl = await QRCode.toDataURL(shareLink, {
+        width: 300,
+        margin: 2,
+        color: {
+          dark: '#000000',
+          light: '#ffffff',
+        },
+      });
+      setQrCodeUrl(qrUrl);
+    } catch (error) {
+      console.error('Failed to generate QR code:', error);
+      toast.error('生成二维码失败');
+    }
+    
+    setShareLinkDialogOpen(true);
+  };
+
+  // 复制分享链接
+  const handleCopyShareLink = async () => {
+    if (!selectedShareInbound) return;
+    
+    const node = allNodes.find(n => n.id.toString() === selectedShareInbound.node_id?.toString());
+    const shareLink = generateShareLink(selectedShareInbound, node);
+    
+    if (!shareLink) {
+      toast.error("无法生成分享链接");
+      return;
+    }
+    
+    const success = await copyToClipboard(shareLink);
+    if (success) {
+      toast.success("分享链接已复制到剪贴板");
+    } else {
+      toast.error("复制失败，请手动复制");
+    }
+  };
+
   const totalInbounds = inbounds.length;
   const enabledCount = inbounds.filter((i) => i.enable || i.enabled).length;
   const totalClients = inbounds.reduce((sum, i) => sum + (i.clients?.length || 0), 0);
@@ -786,6 +845,14 @@ export default function XrayManage() {
                             <Button
                               variant="ghost"
                               size="sm"
+                              onClick={() => handleOpenShareLink(inbound)}
+                              title="分享链接"
+                            >
+                              <QrCode className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               disabled={toggling === inbound.id}
                               onClick={() => handleToggle(inbound)}
                               title={isEnabled ? "暂停" : "启动"}
@@ -1090,6 +1157,44 @@ export default function XrayManage() {
                 取消
               </Button>
               <Button onClick={handleGenerateSelfSigned}>生成</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* 分享链接对话框 */}
+        <Dialog open={shareLinkDialogOpen} onOpenChange={setShareLinkDialogOpen}>
+          <DialogContent className="bg-card/95 backdrop-blur-xl border-white/10">
+            <DialogHeader>
+              <DialogTitle>分享链接</DialogTitle>
+              <DialogDescription>
+                扫描二维码或复制链接导入到客户端
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              {qrCodeUrl && (
+                <div className="flex justify-center">
+                  <img src={qrCodeUrl} alt="QR Code" className="w-64 h-64 border-2 border-white/10 rounded-lg" />
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label>分享链接</Label>
+                <div className="flex gap-2">
+                  <Input
+                    readOnly
+                    value={selectedShareInbound ? generateShareLink(
+                      selectedShareInbound,
+                      allNodes.find(n => n.id.toString() === selectedShareInbound.node_id?.toString())
+                    ) : ""}
+                    className="font-mono text-sm"
+                  />
+                  <Button onClick={handleCopyShareLink} size="icon">
+                    <Copy className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button onClick={() => setShareLinkDialogOpen(false)}>关闭</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
