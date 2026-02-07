@@ -6,10 +6,13 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
+import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import XrayManage from "./pages/XrayManage";
 import GostManage from "./pages/GostManage";
 import TrafficStats from "./pages/TrafficStats";
+import SubscriptionManage from "./pages/SubscriptionManage";
+import NodeManage from "./pages/NodeManage";
 
 
 function Router() {
@@ -17,10 +20,13 @@ function Router() {
     <Switch>
       <Route path={"/"} component={Home} />
       <Route path={"/login"} component={Login} />
+      <Route path={"/register"} component={Register} />
       <Route path={"/dashboard"} component={Dashboard} />
       <Route path={"/xray"} component={XrayManage} />
       <Route path={"/gost"} component={GostManage} />
       <Route path={"/traffic"} component={TrafficStats} />
+      <Route path={"/subscription"} component={SubscriptionManage} />
+      <Route path={"/nodes"} component={NodeManage} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />

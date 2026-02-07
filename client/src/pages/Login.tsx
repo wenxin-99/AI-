@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { authService } from "@/services/auth";
-import { useLocation } from "wouter";
+import { useLocation, Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -103,10 +103,22 @@ export default function Login() {
         </form>
 
         {/* Footer */}
-        <div className="mt-8 text-center">
-          <p className="text-xs text-white/40">
-            默认账号: admin / admin
-          </p>
+        <div className="mt-8 space-y-3">
+          <div className="text-center">
+            <p className="text-white/60 text-sm">
+              还没有账户?{" "}
+              <Link href="/register">
+                <span className="text-cyan-400 hover:text-cyan-300 cursor-pointer font-medium">
+                  立即注册
+                </span>
+              </Link>
+            </p>
+          </div>
+          <div className="text-center">
+            <p className="text-xs text-white/40">
+              默认账号: admin / admin
+            </p>
+          </div>
         </div>
       </Card>
     </div>

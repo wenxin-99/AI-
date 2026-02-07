@@ -9,6 +9,8 @@ import {
   LogOut,
   Menu,
   X,
+  Link2,
+  Server,
 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "./ui/button";
@@ -22,6 +24,8 @@ const navigation = [
   { name: "Xray 管理", href: "/xray", icon: Network },
   { name: "Gost 管理", href: "/gost", icon: GitBranch },
   { name: "流量统计", href: "/traffic", icon: BarChart3 },
+  { name: "订阅管理", href: "/subscription", icon: Link2 },
+  { name: "节点管理", href: "/nodes", icon: Server },
   { name: "系统设置", href: "/settings", icon: Settings },
 ];
 
