@@ -477,9 +477,9 @@ export default function NodeManage() {
                 </Button>
               </div>
               <div className="bg-black/40 border border-white/10 rounded-lg p-4 font-mono text-sm text-cyan-400 overflow-x-auto">
-                <code>
-                  PANEL_URL={window.location.origin} API_TOKEN=your-token bash &lt;(curl -fsSL {window.location.origin}/node-install.sh)
-                </code>
+                <pre className="whitespace-pre-wrap break-all">
+PANEL_URL={window.location.origin} API_TOKEN=your-token bash &lt;(curl -fsSL {window.location.origin}/node-install.sh)
+                </pre>
               </div>
             </div>
             <div className="space-y-2">

@@ -274,7 +274,17 @@ install_xray() {
   
   # 下载Xray安装脚本
   echo -e "  下载Xray..."
-  bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install > /dev/null 2>&1
+  
+  # 使用国内镜像加速
+  if ! bash -c "$(curl -L --max-time 60 https://ghproxy.com/https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install > /dev/null 2>&1; then
+    echo -e "  ${YELLOW}镜像下载失败,尝试直连...${NC}"
+    if ! bash -c "$(curl -L --max-time 120 https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install > /dev/null 2>&1; then
+      echo -e "${RED}❌ Xray安装失败${NC}"
+      exit 1
+    fi
+  fi
+  
+  echo -e "  ${GREEN}下载完成${NC}"
   
   # 创建配置目录
   mkdir -p /usr/local/etc/xray
@@ -340,7 +350,15 @@ install_gost() {
   
   # 获取最新版本
   echo -e "  获取最新版本..."
-  GOST_VERSION=$(curl -s https://api.github.com/repos/go-gost/gost/releases/latest | jq -r .tag_name)
+  GOST_VERSION=$(curl -s --max-time 10 https://api.github.com/repos/go-gost/gost/releases/latest | jq -r .tag_name)
+  
+  # 如果获取失败,使用固定版本
+  if [ -z "$GOST_VERSION" ] || [ "$GOST_VERSION" = "null" ]; then
+    echo -e "  ${YELLOW}无法获取最新版本,使用v3.0.0${NC}"
+    GOST_VERSION="v3.0.0"
+  else
+    echo -e "  ${GREEN}最新版本: $GOST_VERSION${NC}"
+  fi
   
   # 根据架构选择下载文件
   if [ "$ARCH" = "x86_64" ]; then
@@ -354,7 +372,23 @@ install_gost() {
   
   # 下载并安装
   echo -e "  下载Gost ${GOST_VERSION}..."
-  wget -q "https://github.com/go-gost/gost/releases/download/${GOST_VERSION}/${GOST_FILE}"
+  
+  # 使用国内镜像加速下载
+  DOWNLOAD_URL="https://github.com/go-gost/gost/releases/download/${GOST_VERSION}/${GOST_FILE}"
+  MIRROR_URL="https://ghproxy.com/${DOWNLOAD_URL}"
+  
+  # 尝试从镜像下载
+  if ! wget --timeout=30 --tries=3 -q "$MIRROR_URL" -O "$GOST_FILE" 2>/dev/null; then
+    echo -e "  ${YELLOW}镜像下载失败,尝试直连...${NC}"
+    # 尝试直连下载
+    if ! wget --timeout=60 --tries=3 -q "$DOWNLOAD_URL" -O "$GOST_FILE" 2>/dev/null; then
+      echo -e "${RED}❌ Gost下载失败${NC}"
+      echo -e "${YELLOW}请检查网络连接或手动下载: $DOWNLOAD_URL${NC}"
+      exit 1
+    fi
+  fi
+  
+  echo -e "  ${GREEN}下载完成,正在解压...${NC}"
   tar -xzf "$GOST_FILE"
   mv gost /usr/local/bin/
   chmod +x /usr/local/bin/gost
