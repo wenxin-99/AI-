@@ -94,8 +94,45 @@ export default function GostManage() {
   };
 
   const handleCreate = async () => {
+    // 基本验证
     if (!formData.name || !formData.local_port || !formData.remote_addr) {
       toast.error("请填写完整信息");
+      return;
+    }
+
+    // 端口验证
+    const port = parseInt(formData.local_port);
+    if (isNaN(port) || port < 1 || port > 65535) {
+      toast.error("端口号必须在 1-65535 之间");
+      return;
+    }
+
+    // 检查端口是否已被使用
+    if (tunnels.some(tunnel => tunnel.local_port === port)) {
+      toast.error(`端口 ${port} 已被其他隧道使用`);
+      return;
+    }
+
+    // 远程地址验证
+    const remoteAddrRegex = /^[a-zA-Z0-9.-]+:\d+$/;
+    if (!remoteAddrRegex.test(formData.remote_addr)) {
+      toast.error('远程地址格式错误，应为: host:port （例如: example.com:443）');
+      return;
+    }
+
+    // 速度限制验证
+    if (formData.speed_limit_upload && parseInt(formData.speed_limit_upload) < 0) {
+      toast.error('上传速度限制不能为负数');
+      return;
+    }
+    if (formData.speed_limit_download && parseInt(formData.speed_limit_download) < 0) {
+      toast.error('下载速度限制不能为负数');
+      return;
+    }
+
+    // TLS配置验证
+    if (formData.enable_tls && !formData.certificate_id && !formData.skip_verify) {
+      toast.error('启用 TLS 加密时必须选择证书或跳过验证');
       return;
     }
 

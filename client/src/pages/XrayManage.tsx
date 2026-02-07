@@ -110,8 +110,42 @@ export default function XrayManage() {
   };
 
   const handleCreate = async () => {
+    // 基本验证
     if (!formData.remark || !formData.port) {
       toast.error("请填写完整信息");
+      return;
+    }
+
+    // 端口验证
+    const port = parseInt(formData.port);
+    if (isNaN(port) || port < 1 || port > 65535) {
+      toast.error("端口号必须在 1-65535 之间");
+      return;
+    }
+
+    // 检查端口是否已被使用
+    if (inbounds.some(inbound => inbound.port === port)) {
+      toast.error(`端口 ${port} 已被其他入站使用`);
+      return;
+    }
+
+    // WebSocket配置验证
+    if (streamSettings.network === 'ws') {
+      if (!streamSettings.ws_path || !streamSettings.ws_path.startsWith('/')) {
+        toast.error('WebSocket 路径必须以 / 开头');
+        return;
+      }
+    }
+
+    // gRPC配置验证
+    if (streamSettings.network === 'grpc' && !streamSettings.grpc_service_name) {
+      toast.error('请填写 gRPC 服务名称');
+      return;
+    }
+
+    // TLS配置验证
+    if (streamSettings.security === 'tls' && !streamSettings.certificate_id) {
+      toast.error('启用 TLS 加密时必须选择证书');
       return;
     }
 
