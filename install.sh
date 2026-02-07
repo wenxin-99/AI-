@@ -276,6 +276,12 @@ build_frontend() {
     
     cd /opt/uniproxy-panel || error_exit "无法进入项目目录"
     
+    # 创建前端环境变量配置
+    log_info "配置前端API地址..."
+    cat > .env.production <<'EOF'
+VITE_API_URL=/api/v1
+EOF
+    
     log_info "正在安装前端依赖..."
     pnpm install || error_exit "前端依赖安装失败"
     
