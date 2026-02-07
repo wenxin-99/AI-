@@ -33,25 +33,25 @@ export const nodeService = {
   // 创建节点
   create: async (data: Partial<Node>) => {
     const response = await apiClient.post("/api/v1/node", data);
-    return response.data;
+    return response;
   },
 
   // 更新节点
   update: async (id: number, data: Partial<Node>) => {
     const response = await apiClient.put(`/api/v1/node/${id}`, data);
-    return response.data;
+    return response;
   },
 
   // 删除节点
   delete: async (id: number) => {
     const response = await apiClient.delete(`/api/v1/node/${id}`);
-    return response.data;
+    return response;
   },
 
   // 获取节点
   get: async (id: number) => {
     const response = await apiClient.get(`/api/v1/node/${id}`);
-    return response.data.data as Node;
+    return response.data as Node;
   },
 
   // 获取节点列表
@@ -59,31 +59,31 @@ export const nodeService = {
     const response = await apiClient.get("/api/v1/node/list", {
       params: { page, page_size: pageSize },
     });
-    return response.data.data;
+    return response.data;
   },
 
   // 切换节点状态
   toggle: async (id: number) => {
     const response = await apiClient.post(`/api/v1/node/${id}/toggle`);
-    return response.data;
+    return response;
   },
 
   // 同步节点配置
   sync: async (id: number) => {
     const response = await apiClient.post(`/api/v1/node/${id}/sync`);
-    return response.data;
+    return response;
   },
 
   // 获取节点统计
   getStats: async (id: number) => {
     const response = await apiClient.get(`/api/v1/node/${id}/stats`);
-    return response.data.data as NodeStats;
+    return response.data as NodeStats;
   },
 
   // 检查节点健康
   checkHealth: async (id: number) => {
     const response = await apiClient.get(`/api/v1/node/${id}/health`);
-    return response.data.data;
+    return response.data;
   },
 
   // 批量同步节点
@@ -91,6 +91,6 @@ export const nodeService = {
     const response = await apiClient.post("/api/v1/node/batch-sync", {
       node_ids: nodeIds,
     });
-    return response.data;
+    return response;
   },
 };
