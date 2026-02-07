@@ -28,12 +28,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Play, Pause, Edit, Trash2, GitBranch, RefreshCw } from "lucide-react";
+import { Plus, Play, Pause, Edit, Trash2, GitBranch, RefreshCw, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { gostService, GostTunnel } from "@/services/gost";
+import { Switch } from "@/components/ui/switch";
+import api from "@/lib/api";
+
+interface Certificate {
+  id: number;
+  name: string;
+  domain: string;
+  status: string;
+}
 
 export default function GostManage() {
   const [tunnels, setTunnels] = useState<GostTunnel[]>([]);
+  const [certificates, setCertificates] = useState<Certificate[]>([]);
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -49,11 +59,25 @@ export default function GostManage() {
     password: "",
     speed_limit_upload: "",
     speed_limit_download: "",
+    enable_tls: false,
+    certificate_id: "",
+    tls_server_name: "",
+    skip_verify: false,
   });
 
   useEffect(() => {
     fetchTunnels();
+    fetchCertificates();
   }, []);
+
+  const fetchCertificates = async () => {
+    try {
+      const response = await api.get('/certificates');
+      setCertificates(response.data.certificates || []);
+    } catch (error) {
+      console.error("Failed to fetch certificates:", error);
+    }
+  };
 
   const fetchTunnels = async () => {
     try {
@@ -84,6 +108,10 @@ export default function GostManage() {
         password: formData.password || undefined,
         speed_limit_upload: formData.speed_limit_upload ? parseInt(formData.speed_limit_upload) : undefined,
         speed_limit_download: formData.speed_limit_download ? parseInt(formData.speed_limit_download) : undefined,
+        enable_tls: formData.enable_tls,
+        certificate_id: formData.certificate_id ? parseInt(formData.certificate_id) : undefined,
+        tls_server_name: formData.tls_server_name || undefined,
+        skip_verify: formData.skip_verify,
       });
       toast.success("隧道创建成功");
       setCreateDialogOpen(false);
@@ -107,6 +135,10 @@ export default function GostManage() {
         password: formData.password || undefined,
         speed_limit_upload: formData.speed_limit_upload ? parseInt(formData.speed_limit_upload) : undefined,
         speed_limit_download: formData.speed_limit_download ? parseInt(formData.speed_limit_download) : undefined,
+        enable_tls: formData.enable_tls,
+        certificate_id: formData.certificate_id ? parseInt(formData.certificate_id) : undefined,
+        tls_server_name: formData.tls_server_name || undefined,
+        skip_verify: formData.skip_verify,
       });
       toast.success("隧道更新成功");
       setEditDialogOpen(false);
@@ -158,6 +190,10 @@ export default function GostManage() {
       password: "",
       speed_limit_upload: "",
       speed_limit_download: "",
+      enable_tls: false,
+      certificate_id: "",
+      tls_server_name: "",
+      skip_verify: false,
     });
   };
 
@@ -172,6 +208,10 @@ export default function GostManage() {
       password: tunnel.password || "",
       speed_limit_upload: tunnel.speed_limit_upload?.toString() || "",
       speed_limit_download: tunnel.speed_limit_download?.toString() || "",
+      enable_tls: (tunnel as any).enable_tls || false,
+      certificate_id: (tunnel as any).certificate_id?.toString() || "",
+      tls_server_name: (tunnel as any).tls_server_name || "",
+      skip_verify: (tunnel as any).skip_verify || false,
     });
     setEditDialogOpen(true);
   };
@@ -438,6 +478,64 @@ export default function GostManage() {
                   onChange={(e) => setFormData({ ...formData, speed_limit_download: e.target.value })}
                 />
               </div>
+              
+              {/* TLS配置 */}
+              <div className="col-span-2 border-t border-white/10 pt-4 mt-2">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="space-y-0.5">
+                    <Label className="text-base">TLS加密</Label>
+                    <p className="text-sm text-muted-foreground">
+                      为隧道启用TLS/SSL加密传输
+                    </p>
+                  </div>
+                  <Switch
+                    checked={formData.enable_tls}
+                    onCheckedChange={(checked) => setFormData({ ...formData, enable_tls: checked })}
+                  />
+                </div>
+                
+                {formData.enable_tls && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>选择证书</Label>
+                      <Select
+                        value={formData.certificate_id}
+                        onValueChange={(value) => setFormData({ ...formData, certificate_id: value })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择已上传的证书" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {certificates.filter(c => c.status === 'active').map((cert) => (
+                            <SelectItem key={cert.id} value={cert.id.toString()}>
+                              {cert.name} ({cert.domain})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>TLS服务器名称 (可选)</Label>
+                      <Input
+                        placeholder="自动使用证书域名"
+                        value={formData.tls_server_name}
+                        onChange={(e) => setFormData({ ...formData, tls_server_name: e.target.value })}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          checked={formData.skip_verify}
+                          onCheckedChange={(checked) => setFormData({ ...formData, skip_verify: checked })}
+                        />
+                        <Label className="text-sm font-normal">
+                          跳过证书验证 (不推荐,仅用于测试)
+                        </Label>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
@@ -495,6 +593,64 @@ export default function GostManage() {
                   value={formData.speed_limit_download}
                   onChange={(e) => setFormData({ ...formData, speed_limit_download: e.target.value })}
                 />
+              </div>
+              
+              {/* TLS配置 */}
+              <div className="col-span-2 border-t border-white/10 pt-4 mt-2">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="space-y-0.5">
+                    <Label className="text-base">TLS加密</Label>
+                    <p className="text-sm text-muted-foreground">
+                      为隧道启用TLS/SSL加密传输
+                    </p>
+                  </div>
+                  <Switch
+                    checked={formData.enable_tls}
+                    onCheckedChange={(checked) => setFormData({ ...formData, enable_tls: checked })}
+                  />
+                </div>
+                
+                {formData.enable_tls && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label>选择证书</Label>
+                      <Select
+                        value={formData.certificate_id}
+                        onValueChange={(value) => setFormData({ ...formData, certificate_id: value })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="选择已上传的证书" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {certificates.filter(c => c.status === 'active').map((cert) => (
+                            <SelectItem key={cert.id} value={cert.id.toString()}>
+                              {cert.name} ({cert.domain})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>TLS服务器名称 (可选)</Label>
+                      <Input
+                        placeholder="自动使用证书域名"
+                        value={formData.tls_server_name}
+                        onChange={(e) => setFormData({ ...formData, tls_server_name: e.target.value })}
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          checked={formData.skip_verify}
+                          onCheckedChange={(checked) => setFormData({ ...formData, skip_verify: checked })}
+                        />
+                        <Label className="text-sm font-normal">
+                          跳过证书验证 (不推荐,仅用于测试)
+                        </Label>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <DialogFooter>
