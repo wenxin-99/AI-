@@ -202,6 +202,7 @@ export default function XrayManage() {
         port: parseInt(formData.port),
         protocol: formData.protocol,
         listen: formData.listen,
+        node_id: selectedNodeId, // 传递节点ID
         stream_settings: streamSettingsJson,
         sniffing: sniffingJson,
       });
@@ -510,7 +511,12 @@ export default function XrayManage() {
   const handleCopyShareLink = async () => {
     if (!selectedShareInbound) return;
     
-    const node = allNodes.find(n => n.id.toString() === selectedShareInbound.node_id?.toString());
+    // 尝试通过node_id匹配，如果失败则使用listen地址匹配
+    let node = allNodes.find(n => n.id.toString() === selectedShareInbound.node_id?.toString());
+    if (!node && selectedShareInbound.listen) {
+      node = allNodes.find(n => n.host === selectedShareInbound.listen);
+      console.log('Using listen address fallback:', selectedShareInbound.listen, 'found node:', node);
+    }
     const shareLink = generateShareLink(selectedShareInbound, node);
     
     if (!shareLink) {
@@ -1198,10 +1204,13 @@ export default function XrayManage() {
                 <div className="flex gap-2">
                   <Input
                     readOnly
-                    value={selectedShareInbound ? generateShareLink(
-                      selectedShareInbound,
-                      allNodes.find(n => n.id.toString() === selectedShareInbound.node_id?.toString())
-                    ) : ""}
+                    value={selectedShareInbound ? (() => {
+                      let node = allNodes.find(n => n.id.toString() === selectedShareInbound.node_id?.toString());
+                      if (!node && selectedShareInbound.listen) {
+                        node = allNodes.find(n => n.host === selectedShareInbound.listen);
+                      }
+                      return generateShareLink(selectedShareInbound, node);
+                    })() : ""}
                     className="font-mono text-sm"
                   />
                   <Button onClick={handleCopyShareLink} size="icon">
