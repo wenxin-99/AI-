@@ -432,12 +432,6 @@ export default function XrayManage() {
           </Card>
         </div>
 
-        {/* 日志查看器 */}
-        <LogViewer 
-          title="Xray 实时日志" 
-          logEndpoint="/api/v1/xray/logs" 
-        />
-
         {/* Inbounds Table */}
         <Card className="bg-card/40 backdrop-blur-xl border-white/10">
           <div className="p-6">
@@ -548,6 +542,12 @@ export default function XrayManage() {
             )}
           </div>
         </Card>
+
+        {/* 日志查看器 */}
+        <LogViewer 
+          title="Xray 实时日志" 
+          logEndpoint="/api/v1/xray/logs" 
+        />
 
         {/* Create Dialog */}
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>

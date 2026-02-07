@@ -350,12 +350,6 @@ export default function GostManage() {
           </Card>
         </div>
 
-        {/* 日志查看器 */}
-        <LogViewer 
-          title="Gost 实时日志" 
-          logEndpoint="/api/v1/gost/logs" 
-        />
-
         {/* Tunnels Table */}
         <Card className="bg-card/40 backdrop-blur-xl border-white/10">
           <div className="p-6">
@@ -451,6 +445,12 @@ export default function GostManage() {
             )}
           </div>
         </Card>
+
+        {/* 日志查看器 */}
+        <LogViewer 
+          title="Gost 实时日志" 
+          logEndpoint="/api/v1/gost/logs" 
+        />
 
         {/* Create Dialog */}
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
