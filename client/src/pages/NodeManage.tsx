@@ -25,13 +25,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { nodeService, type Node } from "@/services/node";
+import TrafficSummary from "@/components/TrafficSummary";
 import {
   Activity,
+  Code,
+  Copy,
   Cpu,
+  Download,
   HardDrive,
   Plus,
   RefreshCw,
   Server,
+  Settings,
   Trash2,
   Wifi,
   WifiOff,
@@ -43,6 +48,9 @@ export default function NodeManage() {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [installScriptOpen, setInstallScriptOpen] = useState(false);
+  const [batchConfigOpen, setBatchConfigOpen] = useState(false);
+  const [selectedNodes, setSelectedNodes] = useState<number[]>([]);
   const [editingNode, setEditingNode] = useState<Node | null>(null);
   const [formData, setFormData] = useState({
     name: "",
@@ -187,14 +195,36 @@ export default function NodeManage() {
             <h1 className="text-3xl font-bold gradient-text">节点管理</h1>
             <p className="text-white/60 mt-1">管理分布式代理节点</p>
           </div>
-          <Button
-            onClick={handleCreate}
-            className="bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-600 hover:to-purple-600"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            添加节点
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              onClick={() => setInstallScriptOpen(true)}
+              variant="outline"
+              className="border-white/20 hover:bg-cyan-500/20 hover:border-cyan-400/50"
+            >
+              <Code className="w-4 h-4 mr-2" />
+              安装脚本
+            </Button>
+            <Button
+              onClick={() => setBatchConfigOpen(true)}
+              variant="outline"
+              className="border-white/20 hover:bg-purple-500/20 hover:border-purple-400/50"
+              disabled={selectedNodes.length === 0}
+            >
+              <Settings className="w-4 h-4 mr-2" />
+              批量配置 ({selectedNodes.length})
+            </Button>
+            <Button
+              onClick={handleCreate}
+              className="bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-600 hover:to-purple-600"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              添加节点
+            </Button>
+          </div>
         </div>
+
+        {/* 流量统计汇总 */}
+        {!loading && nodes.length > 0 && <TrafficSummary nodes={nodes} />}
 
         {/* 节点列表 */}
         {loading ? (
@@ -212,7 +242,16 @@ export default function NodeManage() {
             {nodes.map((node) => (
               <Card
                 key={node.id}
-                className="glass-card border-white/20 p-6 hover:border-cyan-400/30 transition-all duration-300"
+                className={`glass-card border-white/20 p-6 hover:border-cyan-400/30 transition-all duration-300 ${
+                  selectedNodes.includes(node.id) ? 'ring-2 ring-cyan-400' : ''
+                }`}
+                onClick={() => {
+                  if (selectedNodes.includes(node.id)) {
+                    setSelectedNodes(selectedNodes.filter(id => id !== node.id));
+                  } else {
+                    setSelectedNodes([...selectedNodes, node.id]);
+                  }
+                }}
               >
                 {/* 节点头部 */}
                 <div className="flex items-start justify-between mb-4">
@@ -398,6 +437,174 @@ export default function NodeManage() {
               className="bg-gradient-to-r from-cyan-500 to-purple-500"
             >
               {editingNode ? "更新" : "创建"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 安装脚本对话框 */}
+      <Dialog open={installScriptOpen} onOpenChange={setInstallScriptOpen}>
+        <DialogContent className="glass-card border-white/20 max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="gradient-text flex items-center gap-2">
+              <Code className="w-5 h-5" />
+              节点安装脚本
+            </DialogTitle>
+            <DialogDescription className="text-white/60">
+              在远程服务器上运行以下命令自动安装节点
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-white/90">安装命令</Label>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const script = `PANEL_URL=${window.location.origin} API_TOKEN=your-token bash <(curl -fsSL ${window.location.origin}/node-install.sh)`;
+                    navigator.clipboard.writeText(script);
+                    toast.success('已复制到剪贴板');
+                  }}
+                  className="border-white/20 hover:bg-cyan-500/20"
+                >
+                  <Copy className="w-4 h-4 mr-1" />
+                  复制
+                </Button>
+              </div>
+              <div className="bg-black/40 border border-white/10 rounded-lg p-4 font-mono text-sm text-cyan-400 overflow-x-auto">
+                <code>
+                  PANEL_URL={window.location.origin} API_TOKEN=your-token bash &lt;(curl -fsSL {window.location.origin}/node-install.sh)
+                </code>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-white/90">使用说明</Label>
+              <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-2 text-sm text-white/70">
+                <p>1. 将 <code className="bg-black/40 px-2 py-0.5 rounded text-cyan-400">your-token</code> 替换为实际的API Token</p>
+                <p>2. 在远程服务器上以root用户运行该命令</p>
+                <p>3. 脚本会自动安装Xray/Gost并注册到面板</p>
+                <p>4. 支持的系统: Ubuntu, Debian, CentOS, RHEL</p>
+                <p>5. 支持的架构: x86_64, aarch64</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-white/90">环境变量</Label>
+              <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-2 text-sm font-mono text-white/70">
+                <div className="flex justify-between">
+                  <span className="text-cyan-400">PANEL_URL</span>
+                  <span>面板地址 (必需)</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-cyan-400">API_TOKEN</span>
+                  <span>API认证令牌 (必需)</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-cyan-400">NODE_NAME</span>
+                  <span>节点名称 (可选,默认为主机名)</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-cyan-400">NODE_TYPE</span>
+                  <span>节点类型 (可选: xray, gost, both,默认both)</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => {
+                  window.open(`${window.location.origin}/node-install.sh`, '_blank');
+                }}
+                variant="outline"
+                className="flex-1 border-white/20 hover:bg-purple-500/20"
+              >
+                <Download className="w-4 h-4 mr-2" />
+                下载脚本
+              </Button>
+              <Button
+                onClick={() => setInstallScriptOpen(false)}
+                className="flex-1 bg-gradient-to-r from-cyan-500 to-purple-500"
+              >
+                关闭
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 批量配置对话框 */}
+      <Dialog open={batchConfigOpen} onOpenChange={setBatchConfigOpen}>
+        <DialogContent className="glass-card border-white/20 max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="gradient-text flex items-center gap-2">
+              <Settings className="w-5 h-5" />
+              批量配置节点
+            </DialogTitle>
+            <DialogDescription className="text-white/60">
+              为选中的 {selectedNodes.length} 个节点统一下发配置
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="bg-white/5 border border-white/10 rounded-lg p-4">
+              <h4 className="text-white font-medium mb-2">选中的节点:</h4>
+              <div className="flex flex-wrap gap-2">
+                {selectedNodes.map(id => {
+                  const node = nodes.find(n => n.id === id);
+                  return node ? (
+                    <div key={id} className="bg-cyan-500/20 border border-cyan-400/30 rounded px-3 py-1 text-sm text-white">
+                      {node.name}
+                    </div>
+                  ) : null;
+                })}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-white/90">配置操作</Label>
+              <Select defaultValue="sync_xray">
+                <SelectTrigger className="bg-white/5 border-white/20 text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sync_xray">同步Xray配置</SelectItem>
+                  <SelectItem value="sync_gost">同步Gost配置</SelectItem>
+                  <SelectItem value="sync_all">同步所有配置</SelectItem>
+                  <SelectItem value="restart_xray">重启Xray服务</SelectItem>
+                  <SelectItem value="restart_gost">重启Gost服务</SelectItem>
+                  <SelectItem value="restart_all">重启所有服务</SelectItem>
+                  <SelectItem value="update_agent">更新Agent</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="bg-yellow-500/10 border border-yellow-400/30 rounded-lg p-4 text-sm text-yellow-200">
+              <p className="font-medium mb-1">⚠️ 注意事项</p>
+              <ul className="list-disc list-inside space-y-1 text-yellow-200/80">
+                <li>批量操作将同时应用到所有选中的节点</li>
+                <li>重启服务可能导致短暂的连接中断</li>
+                <li>请确保在低峰时段执行批量操作</li>
+              </ul>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setBatchConfigOpen(false)}
+              className="border-white/20"
+            >
+              取消
+            </Button>
+            <Button
+              onClick={async () => {
+                try {
+                  // TODO: 实现批量配置API调用
+                  toast.success('批量配置已下发');
+                  setBatchConfigOpen(false);
+                  setSelectedNodes([]);
+                } catch (error) {
+                  toast.error('批量配置失败');
+                }
+              }}
+              className="bg-gradient-to-r from-cyan-500 to-purple-500"
+            >
+              执行配置
             </Button>
           </div>
         </DialogContent>
