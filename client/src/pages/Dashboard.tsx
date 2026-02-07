@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 import { trafficService } from "@/services/traffic";
 import { systemService } from "@/services/system";
 import { toast } from "sonner";
+import { useWebSocket } from "@/hooks/useWebSocket";
 import {
   Activity,
   Users,
@@ -18,6 +19,19 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [systemStats, setSystemStats] = useState<any>(null);
   const [trafficTrend, setTrafficTrend] = useState<any[]>([]);
+  const [realtimeStats, setRealtimeStats] = useState<any>(null);
+
+  // WebSocket 实时流量
+  const wsUrl = `ws://${window.location.hostname}:2053/ws/realtime-traffic`;
+  const { isConnected, lastMessage } = useWebSocket({
+    url: wsUrl,
+    onMessage: (data) => {
+      setRealtimeStats(data);
+    },
+    onError: (error) => {
+      console.error('WebSocket 错误:', error);
+    },
+  });
 
   useEffect(() => {
     fetchDashboardData();
@@ -55,6 +69,14 @@ export default function Dashboard() {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
   };
+
+  // 计算实时总流量
+  const realtimeTotal = realtimeStats
+    ? Object.values(realtimeStats).reduce(
+        (sum: number, stat: any) => sum + (stat.upload || 0) + (stat.download || 0),
+        0
+      )
+    : 0;
 
   const stats = [
     {
