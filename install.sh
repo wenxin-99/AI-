@@ -285,7 +285,15 @@ build_frontend() {
     # 复制构建产物到nginx目录
     rm -rf /var/www/uniproxy-panel
     mkdir -p /var/www/uniproxy-panel
-    cp -r dist/* /var/www/uniproxy-panel/ || error_exit "前端部署失败"
+    
+    # 根据实际构建输出目录复制文件
+    if [ -d "dist/public" ]; then
+        cp -r dist/public/* /var/www/uniproxy-panel/ || error_exit "前端部署失败"
+    elif [ -d "dist" ]; then
+        cp -r dist/* /var/www/uniproxy-panel/ || error_exit "前端部署失败"
+    else
+        error_exit "找不到构建产物目录"
+    fi
     
     # 设置正确的文件权限
     chown -R www-data:www-data /var/www/uniproxy-panel
