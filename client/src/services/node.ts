@@ -32,31 +32,31 @@ export interface NodeStats {
 export const nodeService = {
   // 创建节点
   create: async (data: Partial<Node>) => {
-    const response = await apiClient.post("/node", data);
+    const response = await apiClient.post("/api/v1/node", data);
     return response.data;
   },
 
   // 更新节点
   update: async (id: number, data: Partial<Node>) => {
-    const response = await apiClient.put(`/node/${id}`, data);
+    const response = await apiClient.put(`/api/v1/node/${id}`, data);
     return response.data;
   },
 
   // 删除节点
   delete: async (id: number) => {
-    const response = await apiClient.delete(`/node/${id}`);
+    const response = await apiClient.delete(`/api/v1/node/${id}`);
     return response.data;
   },
 
   // 获取节点
   get: async (id: number) => {
-    const response = await apiClient.get(`/node/${id}`);
+    const response = await apiClient.get(`/api/v1/node/${id}`);
     return response.data.data as Node;
   },
 
   // 获取节点列表
   list: async (page: number = 1, pageSize: number = 10) => {
-    const response = await apiClient.get("/node/list", {
+    const response = await apiClient.get("/api/v1/node/list", {
       params: { page, page_size: pageSize },
     });
     return response.data.data;
@@ -64,31 +64,31 @@ export const nodeService = {
 
   // 切换节点状态
   toggle: async (id: number) => {
-    const response = await apiClient.post(`/node/${id}/toggle`);
+    const response = await apiClient.post(`/api/v1/node/${id}/toggle`);
     return response.data;
   },
 
   // 同步节点配置
   sync: async (id: number) => {
-    const response = await apiClient.post(`/node/${id}/sync`);
+    const response = await apiClient.post(`/api/v1/node/${id}/sync`);
     return response.data;
   },
 
   // 获取节点统计
   getStats: async (id: number) => {
-    const response = await apiClient.get(`/node/${id}/stats`);
+    const response = await apiClient.get(`/api/v1/node/${id}/stats`);
     return response.data.data as NodeStats;
   },
 
   // 检查节点健康
   checkHealth: async (id: number) => {
-    const response = await apiClient.get(`/node/${id}/health`);
+    const response = await apiClient.get(`/api/v1/node/${id}/health`);
     return response.data.data;
   },
 
   // 批量同步节点
   batchSync: async (nodeIds: number[]) => {
-    const response = await apiClient.post("/node/batch-sync", {
+    const response = await apiClient.post("/api/v1/node/batch-sync", {
       node_ids: nodeIds,
     });
     return response.data;
