@@ -132,14 +132,14 @@ install_gost() {
     GOST_DIR="/usr/local/gost"
     mkdir -p $GOST_DIR
     
-    # 下载最新版本
-    GOST_VERSION=$(curl -s https://api.github.com/repos/ginuerzh/gost/releases/latest | grep tag_name | cut -d '"' -f 4)
-    wget -O /tmp/gost.gz https://github.com/ginuerzh/gost/releases/download/${GOST_VERSION}/gost-linux-amd64-${GOST_VERSION}.gz
-    gunzip -c /tmp/gost.gz > $GOST_DIR/gost
+    # 使用固定版本3.0.0-rc10 (最新稳定版)
+    GOST_VERSION="3.0.0-rc10"
+    wget -O /tmp/gost.tar.gz https://github.com/go-gost/gost/releases/download/v${GOST_VERSION}/gost_${GOST_VERSION}_linux_amd64.tar.gz
+    tar -xzf /tmp/gost.tar.gz -C $GOST_DIR
     chmod +x $GOST_DIR/gost
-    rm /tmp/gost.gz
+    rm /tmp/gost.tar.gz
     
-    log_info "Gost 安装完成: $($GOST_DIR/gost -V)"
+    log_info "Gost 安装完成: $($GOST_DIR/gost -V 2>&1 | head -n 1)"
 }
 
 # 克隆项目代码
