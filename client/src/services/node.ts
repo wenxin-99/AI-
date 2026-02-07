@@ -29,6 +29,15 @@ export interface NodeStats {
   memory_usage: number;
 }
 
+export interface InstallScriptResponse {
+  api_token: string;
+  node_type: string;
+  node_name: string;
+  panel_url: string;
+  script: string;
+  one_liner: string;
+}
+
 export const nodeService = {
   // 创建节点
   create: async (data: Partial<Node>) => {
@@ -62,7 +71,7 @@ export const nodeService = {
     return response;
   },
 
-  // 获取所有节点（不分页，获取足够多的节点）
+  // 获取所有节点（不分页）
   getAll: async (): Promise<Node[]> => {
     const response: any = await apiClient.get("/api/v1/nodes/list", {
       params: { page: 1, page_size: 100 },
@@ -101,5 +110,20 @@ export const nodeService = {
       node_ids: nodeIds,
     });
     return response;
+  },
+
+  // 生成安装脚本
+  generateInstallScript: async (nodeName: string, nodeType: string): Promise<InstallScriptResponse> => {
+    const response: any = await apiClient.post("/api/v1/nodes/generate-install", {
+      node_name: nodeName,
+      node_type: nodeType,
+    });
+    return response?.data || response;
+  },
+
+  // 生成 API Token
+  generateToken: async (): Promise<string> => {
+    const response: any = await apiClient.post("/api/v1/nodes/generate-token");
+    return response?.data?.api_token || response?.api_token || "";
   },
 };
