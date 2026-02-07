@@ -287,6 +287,10 @@ build_frontend() {
     mkdir -p /var/www/uniproxy-panel
     cp -r dist/* /var/www/uniproxy-panel/ || error_exit "前端部署失败"
     
+    # 设置正确的文件权限
+    chown -R www-data:www-data /var/www/uniproxy-panel
+    chmod -R 755 /var/www/uniproxy-panel
+    
     log_info "前端构建完成"
 }
 
@@ -312,6 +316,13 @@ build_backend() {
 # 配置 Nginx
 configure_nginx() {
     log_step "配置 Nginx..."
+    
+    # 删除默认站点
+    rm -f /etc/nginx/sites-enabled/default
+    
+    # 设置正确的文件权限
+    chown -R www-data:www-data /var/www/uniproxy-panel
+    chmod -R 755 /var/www/uniproxy-panel
     
     cat > /etc/nginx/sites-available/uniproxy-panel <<EOF
 server {
