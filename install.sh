@@ -77,9 +77,9 @@ install_dependencies() {
     if [[ "$OS" == "ubuntu" ]] || [[ "$OS" == "debian" ]]; then
         export DEBIAN_FRONTEND=noninteractive
         apt-get update || error_exit "apt-get update 失败"
-        apt-get install -y curl wget git unzip sqlite3 nginx || error_exit "依赖安装失败"
+        apt-get install -y curl wget git unzip sqlite3 nginx socat cron || error_exit "依赖安装失败"
     elif [[ "$OS" == "centos" ]] || [[ "$OS" == "rhel" ]]; then
-        yum install -y curl wget git unzip sqlite nginx || error_exit "依赖安装失败"
+        yum install -y curl wget git unzip sqlite nginx socat cronie || error_exit "依赖安装失败"
     else
         error_exit "不支持的操作系统: $OS"
     fi
@@ -236,6 +236,103 @@ install_gost() {
     log_info "Gost 安装完成: $($GOST_DIR/gost -V 2>&1 | head -n 1)"
 }
 
+# 安装 acme.sh
+install_acme() {
+    log_step "安装 acme.sh 证书管理工具..."
+    
+    if [[ -d "/root/.acme.sh" ]]; then
+        log_info "acme.sh 已安装"
+        return
+    fi
+    
+    log_info "正在安装 acme.sh..."
+    
+    # 带重试的安装
+    local retry=0
+    local max_retry=3
+    
+    while [ $retry -lt $max_retry ]; do
+        if curl -fsSL https://get.acme.sh | sh -s email=admin@example.com; then
+            log_info "acme.sh 安装完成"
+            # 设置环境变量
+            export PATH="$HOME/.acme.sh:$PATH"
+            # 启用自动升级
+            /root/.acme.sh/acme.sh --upgrade --auto-upgrade
+            return
+        else
+            retry=$((retry + 1))
+            if [ $retry -lt $max_retry ]; then
+                log_warn "acme.sh 安装失败,重试 $retry/$max_retry..."
+                sleep 2
+            else
+                log_warn "acme.sh 安装失败,将跳过 HTTPS 配置"
+                return 1
+            fi
+        fi
+    done
+}
+
+# 申请 SSL 证书
+apply_ssl_certificate() {
+    local domain=$1
+    
+    if [[ -z "$domain" ]]; then
+        log_warn "未提供域名,跳过证书申请"
+        return 1
+    fi
+    
+    log_step "为域名 $domain 申请 SSL 证书..."
+    
+    # 检查 acme.sh 是否安装
+    if [[ ! -f "/root/.acme.sh/acme.sh" ]]; then
+        log_error "acme.sh 未安装,无法申请证书"
+        return 1
+    fi
+    
+    # 设置环境变量
+    export PATH="$HOME/.acme.sh:$PATH"
+    
+    # 创建证书目录
+    CERT_DIR="/opt/uniproxy-panel/certs"
+    mkdir -p $CERT_DIR
+    
+    # 停止 Nginx 以释放 80 端口
+    systemctl stop nginx || true
+    
+    log_info "正在申请证书 (使用 standalone 模式)..."
+    
+    # 使用 standalone 模式申请证书
+    /root/.acme.sh/acme.sh --issue -d "$domain" --standalone --keylength ec-256 --force
+    
+    if [[ $? -eq 0 ]]; then
+        log_info "证书申请成功,正在安装..."
+        
+        # 安装证书到指定目录
+        /root/.acme.sh/acme.sh --install-cert -d "$domain" --ecc \
+            --key-file "$CERT_DIR/${domain}.key" \
+            --fullchain-file "$CERT_DIR/${domain}.crt" \
+            --reloadcmd "systemctl reload nginx"
+        
+        if [[ $? -eq 0 ]]; then
+            log_info "SSL 证书安装成功"
+            # 设置文件权限
+            chmod 644 "$CERT_DIR/${domain}.crt"
+            chmod 600 "$CERT_DIR/${domain}.key"
+            return 0
+        else
+            log_error "证书安装失败"
+            return 1
+        fi
+    else
+        log_error "证书申请失败"
+        log_warn "请检查:"
+        log_warn "1. 域名是否正确解析到本服务器 IP"
+        log_warn "2. 防火墙是否开放 80 和 443 端口"
+        log_warn "3. 是否有其他服务占用 80 端口"
+        return 1
+    fi
+}
+
 # 克隆项目代码
 clone_project() {
     log_step "克隆项目代码..."
@@ -343,6 +440,9 @@ build_backend() {
 
 # 配置 Nginx
 configure_nginx() {
+    local domain=$1
+    local use_https=$2
+    
     log_step "配置 Nginx..."
     
     # 删除默认站点
@@ -352,7 +452,80 @@ configure_nginx() {
     chown -R www-data:www-data /var/www/uniproxy-panel
     chmod -R 755 /var/www/uniproxy-panel
     
-    cat > /etc/nginx/sites-available/uniproxy-panel <<EOF
+    # 根据是否有证书生成不同的配置
+    if [[ "$use_https" == "true" ]] && [[ -f "/opt/uniproxy-panel/certs/${domain}.crt" ]]; then
+        log_info "配置 HTTPS 访问..."
+        
+        cat > /etc/nginx/sites-available/uniproxy-panel <<EOF
+# HTTP 自动跳转 HTTPS
+server {
+    listen 80;
+    server_name ${domain};
+    
+    # 用于 acme.sh 证书验证
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/uniproxy-panel;
+    }
+    
+    # 其他请求跳转到 HTTPS
+    location / {
+        return 301 https://\$server_name\$request_uri;
+    }
+}
+
+# HTTPS 主配置
+server {
+    listen 443 ssl http2;
+    server_name ${domain};
+    
+    # SSL 证书配置
+    ssl_certificate /opt/uniproxy-panel/certs/${domain}.crt;
+    ssl_certificate_key /opt/uniproxy-panel/certs/${domain}.key;
+    
+    # SSL 协议配置
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:HIGH:!aNULL:!MD5:!RC4:!DHE;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 10m;
+    
+    # 安全头
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Frame-Options SAMEORIGIN;
+    add_header X-Content-Type-Options nosniff;
+    add_header X-XSS-Protection "1; mode=block";
+    
+    root /var/www/uniproxy-panel;
+    index index.html;
+    
+    location / {
+        try_files \$uri \$uri/ /index.html;
+    }
+    
+    location /api {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+    
+    location /ws {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+    else
+        log_info "配置 HTTP 访问..."
+        
+        cat > /etc/nginx/sites-available/uniproxy-panel <<EOF
 server {
     listen 80;
     server_name _;
@@ -381,6 +554,7 @@ server {
     }
 }
 EOF
+    fi
     
     ln -sf /etc/nginx/sites-available/uniproxy-panel /etc/nginx/sites-enabled/
     nginx -t || error_exit "Nginx 配置测试失败"
@@ -480,6 +654,9 @@ start_services() {
 
 # 显示安装信息
 show_info() {
+    local domain=$1
+    local use_https=$2
+    
     # 获取公网IP
     PUBLIC_IP=$(curl -s ifconfig.me || curl -s icanhazip.com || echo "无法获取")
     
@@ -488,7 +665,13 @@ show_info() {
     log_info "UniProxy Panel 安装完成!"
     echo "=========================================="
     echo ""
-    echo "访问地址: http://${PUBLIC_IP}"
+    
+    if [[ "$use_https" == "true" ]] && [[ -n "$domain" ]]; then
+        echo "访问地址: https://${domain}"
+        echo "HTTP 访问将自动跳转到 HTTPS"
+    else
+        echo "访问地址: http://${PUBLIC_IP}"
+    fi
     echo ""
     
     if [[ -f "/opt/uniproxy-panel/config.yaml" ]]; then
@@ -512,6 +695,16 @@ show_info() {
     echo "  查看状态: systemctl status uniproxy-panel"
     echo "  查看日志: journalctl -u uniproxy-panel -f"
     echo ""
+    
+    if [[ "$use_https" == "true" ]]; then
+        echo "SSL 证书管理:"
+        echo "  证书位置: /opt/uniproxy-panel/certs/"
+        echo "  手动续期: /root/.acme.sh/acme.sh --renew -d $domain --force"
+        echo "  查看证书: /root/.acme.sh/acme.sh --list"
+        echo "  注: acme.sh 已配置自动续期 (cron 任务)"
+        echo ""
+    fi
+    
     echo "=========================================="
 }
 
@@ -526,19 +719,67 @@ main() {
     check_root
     detect_os
     disable_ipv6_if_needed
+    
+    # 询问是否配置 HTTPS
+    echo ""
+    log_info "是否配置 HTTPS 访问？"
+    echo ""
+    echo "  1) 是 - 自动申请免费 SSL 证书（需要域名）"
+    echo "  2) 否 - 仅使用 HTTP 访问"
+    echo ""
+    read -p "请选择 [1/2] (默认: 2): " ssl_choice
+    ssl_choice=${ssl_choice:-2}
+    
+    DOMAIN=""
+    USE_HTTPS="false"
+    
+    if [[ "$ssl_choice" == "1" ]]; then
+        echo ""
+        read -p "请输入您的域名 (例如: panel.example.com): " DOMAIN
+        
+        if [[ -z "$DOMAIN" ]]; then
+            log_warn "未输入域名,将使用 HTTP 模式"
+            USE_HTTPS="false"
+        else
+            log_info "将为域名 $DOMAIN 配置 HTTPS"
+            USE_HTTPS="true"
+        fi
+    fi
+    
+    echo ""
+    log_info "开始安装..."
+    echo ""
+    
     install_dependencies
     install_nodejs
     install_golang
     install_xray
     install_gost
+    
+    # 如果需要 HTTPS,先安装 acme.sh
+    if [[ "$USE_HTTPS" == "true" ]]; then
+        install_acme
+    fi
+    
     clone_project
     build_frontend
     build_backend
-    configure_nginx
+    
+    # 如果需要 HTTPS,申请证书
+    if [[ "$USE_HTTPS" == "true" ]]; then
+        if apply_ssl_certificate "$DOMAIN"; then
+            log_info "证书申请成功"
+        else
+            log_warn "证书申请失败,将使用 HTTP 模式"
+            USE_HTTPS="false"
+        fi
+    fi
+    
+    configure_nginx "$DOMAIN" "$USE_HTTPS"
     create_config
     create_systemd_service
     start_services
-    show_info
+    show_info "$DOMAIN" "$USE_HTTPS"
 }
 
 # 执行主函数
