@@ -44,6 +44,9 @@ api.interceptors.response.use(
     const { status, data } = error.response;
 
     switch (status) {
+      case 400:
+        // 业务逻辑错误 - 不在拦截器中显示toast，由调用方处理
+        break;
       case 401:
         // 未授权 - 清除 token 并跳转到登录页
         localStorage.removeItem("token");

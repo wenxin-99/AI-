@@ -76,6 +76,28 @@ function generateShortId(): string {
   return result;
 }
 
+// 生成 Shadowsocks 2022 密码（32字节 Base64）
+function generateSS2022Password(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return btoa(String.fromCharCode.apply(null, Array.from(bytes)));
+}
+
+// 验证 Base64 格式
+function isValidBase64(str: string): boolean {
+  try {
+    const decoded = atob(str);
+    return decoded.length === 32;
+  } catch {
+    return false;
+  }
+}
+
+// 检查是否为 SS2022 加密方法
+function isSS2022Method(method: string): boolean {
+  return method.startsWith('2022-blake3-');
+}
+
 export default function XrayManage() {
   const [inbounds, setInbounds] = useState<XrayInbound[]>([]);
   const [certificates, setCertificates] = useState<Certificate[]>([]);
@@ -373,6 +395,14 @@ export default function XrayManage() {
       return;
     }
 
+    // SS2022 密码验证
+    if (formData.protocol === "shadowsocks" && isSS2022Method(protocolSettings.ssMethod)) {
+      if (!isValidBase64(protocolSettings.ssPassword)) {
+        toast.error("Shadowsocks 2022 密码必须是 32 字节 Base64 编码格式，请点击“生成密码”按钮");
+        return;
+      }
+    }
+
     try {
       const settingsJson = buildSettings();
       const streamSettingsJson = buildStreamSettings();
@@ -455,6 +485,14 @@ export default function XrayManage() {
     if (!formData.remark || !formData.port) {
       toast.error("请填写完整信息");
       return;
+    }
+
+    // 验证 SS2022 密码格式
+    if (formData.protocol === "shadowsocks" && isSS2022Method(protocolSettings.ssMethod)) {
+      if (!isValidBase64(protocolSettings.ssPassword)) {
+        toast.error("Shadowsocks 2022 密码必须是 32 字节 Base64 编码格式，请点击“生成密码”按钮");
+        return;
+      }
     }
 
     try {
@@ -852,7 +890,14 @@ export default function XrayManage() {
               <Label>加密方式</Label>
               <Select
                 value={protocolSettings.ssMethod}
-                onValueChange={(value) => setProtocolSettings({ ...protocolSettings, ssMethod: value })}
+                onValueChange={(value) => {
+                  const newSettings = { ...protocolSettings, ssMethod: value };
+                  // 如果切换到 SS2022 且当前密码不是有效的 Base64，自动生成新密码
+                  if (isSS2022Method(value) && !isValidBase64(protocolSettings.ssPassword)) {
+                    newSettings.ssPassword = generateSS2022Password();
+                  }
+                  setProtocolSettings(newSettings);
+                }}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -870,11 +915,16 @@ export default function XrayManage() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setProtocolSettings({ ...protocolSettings, ssPassword: generateUUID() })}
+                  onClick={() => {
+                    const newPassword = isSS2022Method(protocolSettings.ssMethod)
+                      ? generateSS2022Password()
+                      : generateUUID();
+                    setProtocolSettings({ ...protocolSettings, ssPassword: newPassword });
+                  }}
                   className="h-6 text-xs"
                 >
                   <RefreshCw className="w-3 h-3 mr-1" />
-                  重新生成
+                  生成密码
                 </Button>
               </div>
               <Input
@@ -882,6 +932,14 @@ export default function XrayManage() {
                 onChange={(e) => setProtocolSettings({ ...protocolSettings, ssPassword: e.target.value })}
                 className="font-mono text-sm"
               />
+              {isSS2022Method(protocolSettings.ssMethod) && (
+                <p className="text-xs text-muted-foreground">
+                  Shadowsocks 2022 需要 32 字节 Base64 编码的密码
+                  {!isValidBase64(protocolSettings.ssPassword) && (
+                    <span className="text-destructive ml-1">（当前密码格式不正确）</span>
+                  )}
+                </p>
+              )}
             </div>
           </>
         )}

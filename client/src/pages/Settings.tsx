@@ -9,7 +9,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Settings as SettingsIcon, User, Shield, Server, Plus, Trash2, Edit, Key, RefreshCw, Info, Users, Calendar, Clock } from 'lucide-react';
+import { Settings as SettingsIcon, User, Shield, Server, Plus, Trash2, Edit, Key, RefreshCw, Info, Users, Calendar, Clock, RotateCcw, AlertTriangle } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { toast } from 'sonner';
 import api from '@/lib/api';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -68,6 +69,11 @@ export default function Settings() {
   const [editUserDialogOpen, setEditUserDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserInfo | null>(null);
   const [changePasswordDialogOpen, setChangePasswordDialogOpen] = useState(false);
+  const [needsRestart, setNeedsRestart] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
 
   // 创建用户表单
   const [newUser, setNewUser] = useState({
@@ -138,9 +144,50 @@ export default function Settings() {
   const handleSaveSettings = async () => {
     try {
       await api.put('/api/v1/system/settings', systemSettings);
-      toast.success('系统设置已保存');
+      toast.success('系统设置已保存，部分设置需要重启服务后生效');
+      setNeedsRestart(true);
     } catch (error) {
       toast.error(`保存失败: ${error instanceof Error ? error.message : '未知错误'}`);
+    }
+  };
+
+  const handleRestartService = async () => {
+    if (!confirm('确定要重启面板服务吗？重启期间面板将短暂不可用。')) return;
+    setRestarting(true);
+    try {
+      await api.post('/api/v1/system/restart');
+      toast.success('服务正在重启，请等待...');
+      // 等待服务重启完成后自动刷新页面
+      setTimeout(() => {
+        const checkAlive = async () => {
+          try {
+            await api.get('/api/v1/system/info');
+            toast.success('服务已重启完成');
+            setNeedsRestart(false);
+            setRestarting(false);
+            window.location.reload();
+          } catch {
+            setTimeout(checkAlive, 2000);
+          }
+        };
+        checkAlive();
+      }, 5000);
+    } catch {
+      // 网络错误是预期的（服务正在重启）
+      setTimeout(() => {
+        const checkAlive = async () => {
+          try {
+            await api.get('/api/v1/system/info');
+            toast.success('服务已重启完成');
+            setNeedsRestart(false);
+            setRestarting(false);
+            window.location.reload();
+          } catch {
+            setTimeout(checkAlive, 2000);
+          }
+        };
+        checkAlive();
+      }, 5000);
     }
   };
 
@@ -227,33 +274,37 @@ export default function Settings() {
   };
 
   const handleChangePassword = async () => {
+    setPasswordError('');
+    setPasswordSuccess('');
     if (!passwordForm.old_password || !passwordForm.new_password || !passwordForm.confirm_password) {
-      toast.error('请填写完整信息');
+      setPasswordError('请填写完整信息');
       return;
     }
     if (passwordForm.new_password !== passwordForm.confirm_password) {
-      toast.error('两次输入的密码不一致');
+      setPasswordError('两次输入的密码不一致');
       return;
     }
     if (passwordForm.new_password.length < 6) {
-      toast.error('新密码长度至少6位');
+      setPasswordError('新密码长度至少6位');
       return;
     }
+    setPasswordLoading(true);
     try {
       await api.put('/api/v1/auth/profile', {
         old_password: passwordForm.old_password,
         new_password: passwordForm.new_password,
       });
-      toast.success('密码修改成功,请重新登录');
-      setChangePasswordDialogOpen(false);
+      setPasswordSuccess('密码修改成功，即将跳转到登录页...');
       setPasswordForm({ old_password: '', new_password: '', confirm_password: '' });
       localStorage.removeItem('token');
       setTimeout(() => {
         window.location.href = '/login';
-      }, 1500);
+      }, 2000);
     } catch (error: any) {
       const msg = error?.response?.data?.message || error?.message || '修改失败';
-      toast.error(msg);
+      setPasswordError(msg);
+    } finally {
+      setPasswordLoading(false);
     }
   };
 
@@ -303,7 +354,14 @@ export default function Settings() {
             </h1>
             <p className="text-muted-foreground mt-1">管理系统配置、用户和安全设置</p>
           </div>
-          <Dialog open={changePasswordDialogOpen} onOpenChange={setChangePasswordDialogOpen}>
+          <Dialog open={changePasswordDialogOpen} onOpenChange={(open) => {
+              setChangePasswordDialogOpen(open);
+              if (open) {
+                setPasswordError('');
+                setPasswordSuccess('');
+                setPasswordForm({ old_password: '', new_password: '', confirm_password: '' });
+              }
+            }}>
             <DialogTrigger asChild>
               <Button variant="outline" className="gap-2">
                 <Key className="h-4 w-4" />
@@ -342,9 +400,21 @@ export default function Settings() {
                     placeholder="再次输入新密码"
                   />
                 </div>
+                {passwordError && (
+                  <div className="p-3 rounded-md bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                    {passwordError}
+                  </div>
+                )}
+                {passwordSuccess && (
+                  <div className="p-3 rounded-md bg-green-500/10 border border-green-500/30 text-green-400 text-sm">
+                    {passwordSuccess}
+                  </div>
+                )}
                 <div className="flex justify-end gap-2">
                   <Button variant="outline" onClick={() => setChangePasswordDialogOpen(false)}>取消</Button>
-                  <Button onClick={handleChangePassword}>确认修改</Button>
+                  <Button onClick={handleChangePassword} disabled={passwordLoading || !!passwordSuccess}>
+                    {passwordLoading ? '提交中...' : '确认修改'}
+                  </Button>
                 </div>
               </div>
             </DialogContent>
@@ -468,7 +538,35 @@ export default function Settings() {
               </Card>
             )}
 
-            <div className="flex justify-end">
+            {needsRestart && (
+              <Alert className="border-amber-500/50 bg-amber-500/10">
+                <AlertTriangle className="h-4 w-4 text-amber-400" />
+                <AlertDescription className="flex items-center justify-between">
+                  <span className="text-amber-200">配置已保存，部分设置需要重启服务后才能生效。</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleRestartService}
+                    disabled={restarting}
+                    className="ml-4 gap-2 border-amber-500/50 text-amber-200 hover:bg-amber-500/20"
+                  >
+                    <RotateCcw className={`h-4 w-4 ${restarting ? 'animate-spin' : ''}`} />
+                    {restarting ? '重启中...' : '立即重启'}
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            <div className="flex justify-end gap-3">
+              <Button
+                variant="outline"
+                onClick={handleRestartService}
+                disabled={restarting}
+                className="gap-2"
+              >
+                <RotateCcw className={`h-4 w-4 ${restarting ? 'animate-spin' : ''}`} />
+                {restarting ? '重启中...' : '重启服务'}
+              </Button>
               <Button onClick={handleSaveSettings} className="gap-2">
                 保存配置
               </Button>
