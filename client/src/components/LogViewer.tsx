@@ -91,7 +91,7 @@ export default function LogViewer({ title, logEndpoint, autoScroll = true }: Log
         return 'destructive';
       case 'warn':
       case 'warning':
-        return 'warning';
+        return 'outline';
       case 'info':
         return 'default';
       case 'debug':

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { gostService, GostTunnel, GostStats } from "@/services/gost";
+import { gostService, GostTunnel } from "@/services/gost";
 import { toast } from "sonner";
 
 export function useGostTunnels() {
@@ -11,7 +11,7 @@ export function useGostTunnels() {
     try {
       setLoading(true);
       const data = await gostService.getTunnels();
-      setTunnels(data);
+      setTunnels(Array.isArray(data) ? data : (data as any)?.tunnels || []);
       setError(null);
     } catch (err) {
       setError(err as Error);
@@ -29,14 +29,14 @@ export function useGostTunnels() {
 }
 
 export function useGostStats() {
-  const [stats, setStats] = useState<GostStats | null>(null);
+  const [stats, setStats] = useState<{ running: boolean; version: string; enabled: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
   const fetchStats = async () => {
     try {
       setLoading(true);
-      const data = await gostService.getStats();
+      const data = await gostService.getStatus();
       setStats(data);
       setError(null);
     } catch (err) {

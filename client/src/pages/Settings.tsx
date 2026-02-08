@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Settings as SettingsIcon, User, Shield, Server, Plus, Trash2, Edit, Key, RefreshCw, Info, Users } from 'lucide-react';
+import { Settings as SettingsIcon, User, Shield, Server, Plus, Trash2, Edit, Key, RefreshCw, Info, Users, Calendar, Clock } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -84,6 +84,7 @@ export default function Settings() {
     enabled: true,
     traffic_limit: 0,
     password: '',
+    expire_time: '' as string,
   });
 
   // 修改密码表单
@@ -171,6 +172,7 @@ export default function Settings() {
       enabled: user.enabled,
       traffic_limit: user.traffic_limit,
       password: '',
+      expire_time: user.expire_time ? new Date(user.expire_time).toISOString().slice(0, 16) : '',
     });
     setEditUserDialogOpen(true);
   };
@@ -186,6 +188,12 @@ export default function Settings() {
       };
       if (editForm.password) {
         payload.password = editForm.password;
+      }
+      // 处理到期时间
+      if (editForm.expire_time) {
+        payload.expire_time = new Date(editForm.expire_time).toISOString();
+      } else {
+        payload.expire_time = ''; // 空字符串表示清除到期时间
       }
       await api.put(`/api/v1/users/${editingUser.id}`, payload);
       toast.success('用户更新成功');
@@ -264,8 +272,24 @@ export default function Settings() {
 
   const getStatusBadge = (user: UserInfo) => {
     if (!user.enabled) return <Badge variant="destructive">已禁用</Badge>;
+    // 检查是否已过期
+    if (user.expire_time && new Date(user.expire_time) < new Date()) {
+      return <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30">已过期</Badge>;
+    }
     if (user.status === 'active') return <Badge className="bg-green-500/20 text-green-400 border-green-500/30">活跃</Badge>;
     return <Badge variant="outline">{user.status}</Badge>;
+  };
+
+  const formatExpireTime = (expireTime: string | null) => {
+    if (!expireTime) return '永不过期';
+    const date = new Date(expireTime);
+    const now = new Date();
+    const diffMs = date.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    const dateStr = date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+    if (diffDays < 0) return `${dateStr} (已过期 ${Math.abs(diffDays)} 天)`;
+    if (diffDays <= 7) return `${dateStr} (${diffDays} 天后过期)`;
+    return dateStr;
   };
 
   return (
@@ -569,6 +593,59 @@ export default function Settings() {
                       placeholder="输入新密码"
                     />
                   </div>
+                  <div>
+                    <Label className="flex items-center gap-2"><Calendar className="h-4 w-4" />到期时间</Label>
+                    <Input
+                      type="datetime-local"
+                      value={editForm.expire_time}
+                      onChange={(e) => setEditForm({ ...editForm, expire_time: e.target.value })}
+                    />
+                    <div className="flex items-center gap-2 mt-1">
+                      <p className="text-xs text-muted-foreground flex-1">留空表示永不过期</p>
+                      <div className="flex gap-1">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-xs px-2"
+                          onClick={() => {
+                            const d = new Date();
+                            d.setMonth(d.getMonth() + 1);
+                            setEditForm({ ...editForm, expire_time: d.toISOString().slice(0, 16) });
+                          }}
+                        >+1月</Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-xs px-2"
+                          onClick={() => {
+                            const d = new Date();
+                            d.setMonth(d.getMonth() + 3);
+                            setEditForm({ ...editForm, expire_time: d.toISOString().slice(0, 16) });
+                          }}
+                        >+3月</Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-xs px-2"
+                          onClick={() => {
+                            const d = new Date();
+                            d.setFullYear(d.getFullYear() + 1);
+                            setEditForm({ ...editForm, expire_time: d.toISOString().slice(0, 16) });
+                          }}
+                        >+1年</Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-xs px-2 text-red-400"
+                          onClick={() => setEditForm({ ...editForm, expire_time: '' })}
+                        >清除</Button>
+                      </div>
+                    </div>
+                  </div>
                   <div className="flex items-center justify-between">
                     <Label>启用状态</Label>
                     <Switch
@@ -604,6 +681,7 @@ export default function Settings() {
                       <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground">角色</th>
                       <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground">状态</th>
                       <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground">流量</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground">到期时间</th>
                       <th className="text-left py-3 px-4 text-sm font-medium text-muted-foreground">创建时间</th>
                       <th className="text-right py-3 px-4 text-sm font-medium text-muted-foreground">操作</th>
                     </tr>
@@ -639,6 +717,13 @@ export default function Settings() {
                               />
                             </div>
                           )}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="text-sm">
+                            <span className={user.expire_time && new Date(user.expire_time) < new Date() ? 'text-orange-400' : 'text-muted-foreground'}>
+                              {formatExpireTime(user.expire_time)}
+                            </span>
+                          </div>
                         </td>
                         <td className="py-3 px-4 text-sm text-muted-foreground">
                           {new Date(user.created_at).toLocaleDateString('zh-CN')}

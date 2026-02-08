@@ -222,7 +222,7 @@ export const xrayService = {
     // 2. 替换 + 为 -，/ 为 _（URL安全）
     // 3. 去掉尾部 = 填充
     const toBase64RawURL = (bytes: Uint8Array) => {
-      const standard = btoa(String.fromCharCode(...bytes));
+      const standard = btoa(String.fromCharCode(...Array.from(bytes)));
       return standard.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     };
     

@@ -36,7 +36,7 @@ export function useXrayStats() {
   const fetchStats = async () => {
     try {
       setLoading(true);
-      const data = await xrayService.getStats();
+      const data = await xrayService.getStatus();
       setStats(data);
       setError(null);
     } catch (err) {
