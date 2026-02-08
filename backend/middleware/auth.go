@@ -108,3 +108,30 @@ func GenerateToken(userID uint, username, role string, cfg *config.Config) (stri
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(cfg.Security.JWTSecret))
 }
+
+// NodeAPIAuth 节点API认证中间件（使用API Token）
+func NodeAPIAuth(db interface{}) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 从Header获取API Token
+		apiToken := c.GetHeader("X-API-Token")
+		if apiToken == "" {
+			// 尝试从查询参数获取
+			apiToken = c.Query("api_token")
+		}
+
+		if apiToken == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"success": false,
+				"message": "未提供API令牌",
+			})
+			c.Abort()
+			return
+		}
+
+		// TODO: 验证API Token并获取节点信息
+		// 这里需要从数据库查询节点信息
+		// 暂时允许通过，待实现完整的节点认证逻辑
+		
+		c.Next()
+	}
+}

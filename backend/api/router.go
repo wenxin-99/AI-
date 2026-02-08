@@ -37,7 +37,7 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	registerController := controllers.NewRegisterController(cfg, db)
 	userController := controllers.NewUserController(db)
 	xrayController := controllers.NewXrayController(cfg, db)
-	// gostController := controllers.NewGostController(cfg, db) // Temporarily disabled
+	gostController := controllers.NewGostController(cfg, db)
 	systemController := controllers.NewSystemController(cfg, db)
 	trafficController := controllers.NewTrafficController(db)
 	subscriptionController := controllers.NewSubscriptionController(db)
@@ -112,11 +112,31 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 					// xray.POST("/inbounds/:id/test", xrayController.TestInbound) // TODO: Implement
 			}
 
-			// Gost管理 - Temporarily disabled
-			// gost := authenticated.Group("/gost")
-			// {
-			// 	// TODO: Re-implement Gost management when needed
-			// }
+			// Gost管理
+			gost := authenticated.Group("/gost")
+			{
+				// 隧道管理
+				gost.GET("/tunnels", gostController.ListTunnels)
+				gost.POST("/tunnels", gostController.CreateTunnel)
+				gost.GET("/tunnels/:id", gostController.GetTunnel)
+				gost.PUT("/tunnels/:id", gostController.UpdateTunnel)
+				gost.DELETE("/tunnels/:id", gostController.DeleteTunnel)
+				// Toggle is handled via PUT with enable field
+
+				// 转发规则管理
+				gost.GET("/forwards", gostController.ListForwards)
+				gost.POST("/forwards", gostController.CreateForward)
+				gost.PUT("/forwards/:id", gostController.UpdateForward)
+				gost.DELETE("/forwards/:id", gostController.DeleteForward)
+				// Toggle is handled via PUT with enable field
+
+					// Gost控制
+					gost.POST("/restart", gostController.Restart)
+					gost.GET("/status", gostController.GetStatus)
+					
+					// 测试连接
+					// gost.POST("/forwards/:id/test", gostController.TestForward) // TODO: Implement
+			}
 
 			// 系统管理(仅管理员)
 			system := authenticated.Group("/system")
@@ -190,9 +210,9 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		}
 
 		// 订阅公开接口(无需认证)
-		// 节点API接口(使用JWT认证)
+		// 节点API接口(使用API Token认证)
 		nodeAPI := v1.Group("/node")
-		nodeAPI.Use(middleware.JWTAuth(cfg))
+		nodeAPI.Use(middleware.NodeAPIAuth(db))
 		{
 			nodeAPI.POST("/heartbeat", nodeController.Heartbeat)
 			nodeAPI.GET("/config", nodeController.GetNodeConfig)

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/uniproxy/panel/database/model"
@@ -77,8 +78,21 @@ func (nc *NodeController) Heartbeat(c *gin.Context) {
 		})
 		return
 	}
+	
+	// 更新心跳时间和流量
+	now := time.Now()
+	node.LastHeartbeat = &now
+	node.TrafficUp += req.TrafficUp
+	node.TrafficDown += req.TrafficDown
+	if err := nc.db.Save(node).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": "保存节点信息失败: " + err.Error(),
+		})
+		return
+	}
 
-	// 检查是否有新配置需要下发 (Gost功能暂时禁用)
+	// 检查是否有新配置需要下发 (暂时返回空配置)
 	// gostService := services.NewGostService(nil, nc.db)
 	// gostConfig, _ := gostService.GenerateNodeGostConfig(node.ID)
 	var gostConfig interface{} = nil
@@ -127,7 +141,7 @@ func (nc *NodeController) GetNodeConfig(c *gin.Context) {
 		return
 	}
 
-	// 生成该节点的Gost配置 (Gost功能暂时禁用)
+	// 生成该节点的Gost配置 (暂时返回空配置)
 	// gostService := services.NewGostService(nil, nc.db)
 	// gostConfig, _ := gostService.GenerateNodeGostConfig(node.ID)
 	var gostConfig interface{} = nil

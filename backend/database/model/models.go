@@ -75,6 +75,9 @@ type GostTunnel struct {
 	ID          uint           `gorm:"primaryKey" json:"id"`
 	UserID      uint           `json:"user_id"`
 	Name        string         `gorm:"size:100" json:"name"`
+	Remark      string         `gorm:"size:255" json:"remark"`
+	InNodeID    uint           `gorm:"default:0" json:"in_node_id"`
+	OutNodeID   uint           `gorm:"default:0" json:"out_node_id"`
 	Protocol    string         `gorm:"size:20" json:"protocol"` // tcp, udp, http, https, socks5
 	Type        string         `gorm:"size:20" json:"type"` // tcp, udp
 	Mode        string         `gorm:"size:20" json:"mode"` // port_forward, tunnel
@@ -140,6 +143,26 @@ type Setting struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// GostForward Gost转发规则
+type GostForward struct {
+	ID          uint           `gorm:"primaryKey" json:"id"`
+	TunnelID    uint           `json:"tunnel_id"`
+	Name        string         `gorm:"size:100" json:"name"`
+	Protocol    string         `gorm:"size:20" json:"protocol"` // tcp, udp, http, socks5
+	ListenAddr  string         `gorm:"size:255" json:"listen_addr"` // :port or host:port
+	TargetAddr  string         `gorm:"size:255" json:"target_addr"` // host:port
+	InPort      int            `json:"in_port"`
+	OutPort     int            `json:"out_port"`
+	RemoteAddr  string         `gorm:"size:255" json:"remote_addr"`
+	Remark      string         `gorm:"size:255" json:"remark"`
+	Enable      bool           `gorm:"default:true" json:"enable"`
+	TrafficUp   int64          `gorm:"default:0" json:"traffic_up"`
+	TrafficDown int64          `gorm:"default:0" json:"traffic_down"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
 // Subscription 订阅
 type Subscription struct {
 	ID          uint           `gorm:"primaryKey" json:"id"`
@@ -159,6 +182,7 @@ func (User) TableName() string           { return "users" }
 func (XrayInbound) TableName() string    { return "xray_inbounds" }
 func (XrayClient) TableName() string     { return "xray_clients" }
 func (GostTunnel) TableName() string     { return "gost_tunnels" }
+func (GostForward) TableName() string    { return "gost_forwards" }
 func (Node) TableName() string           { return "nodes" }
 func (TrafficLog) TableName() string     { return "traffic_logs" }
 func (Setting) TableName() string        { return "settings" }
