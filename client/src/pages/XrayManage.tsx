@@ -999,7 +999,8 @@ export default function XrayManage() {
             <SelectItem value="tcp">TCP</SelectItem>
             <SelectItem value="ws">WebSocket</SelectItem>
             <SelectItem value="http">HTTP/2</SelectItem>
-            <SelectItem value="grpc">gRPC</SelectItem>            <SelectItem value="xhttp">XHTTP</SelectItem>
+            <SelectItem value="grpc">gRPC</SelectItem>
+            <SelectItem value="xhttp">XHTTP</SelectItem>
             <SelectItem value="quic">QUIC</SelectItem>
           </SelectContent>
         </Select>

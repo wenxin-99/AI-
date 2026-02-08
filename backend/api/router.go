@@ -103,10 +103,13 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 				xray.PUT("/clients/:id", xrayController.UpdateClient)
 				xray.DELETE("/clients/:id", xrayController.DeleteClient)
 
-				// Xray控制
-				xray.POST("/restart", xrayController.Restart)
-				xray.GET("/status", xrayController.GetStatus)
-				xray.POST("/generate-keypair", xrayController.GenerateKeypair)
+					// Xray控制
+					xray.POST("/restart", xrayController.Restart)
+					xray.GET("/status", xrayController.GetStatus)
+					xray.POST("/generate-keypair", xrayController.GenerateKeypair)
+					
+					// 测试连接
+					xray.POST("/inbounds/:id/test", xrayController.TestInbound)
 			}
 
 			// Gost管理
@@ -127,9 +130,12 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 				gost.DELETE("/forwards/:id", gostController.DeleteForward)
 				// Toggle is handled via PUT with enable field
 
-				// Gost控制
-				gost.POST("/restart", gostController.Restart)
-				gost.GET("/status", gostController.GetStatus)
+					// Gost控制
+					gost.POST("/restart", gostController.Restart)
+					gost.GET("/status", gostController.GetStatus)
+					
+					// 测试连接
+					gost.POST("/forwards/:id/test", gostController.TestForward)
 			}
 
 			// 系统管理(仅管理员)
