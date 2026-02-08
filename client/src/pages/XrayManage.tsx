@@ -471,6 +471,7 @@ export default function XrayManage() {
         port: parseInt(formData.port),
         protocol: formData.protocol,
         listen: formData.listen,
+        node_id: selectedNodeId ? parseInt(selectedNodeId) : undefined,
         settings: settingsJson,
         stream_settings: streamSettingsJson,
         sniffing: sniffingJson,
@@ -649,6 +650,9 @@ export default function XrayManage() {
         console.error("Failed to parse sniffing:", e);
       }
     }
+    
+    // 设置节点关联
+    setSelectedNodeId(inbound.node_id ? inbound.node_id.toString() : "");
     
     setEditDialogOpen(true);
   };
@@ -1258,44 +1262,42 @@ export default function XrayManage() {
       </TabsList>
       
       <TabsContent value="basic" className="space-y-4">
-        {!isEdit && (
-          <div className="space-y-2">
-            <Label htmlFor="node">选择节点</Label>
-            <Select
-              value={selectedNodeId}
-              onValueChange={(value) => setSelectedNodeId(value)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="选择一个在线节点" />
-              </SelectTrigger>
-              <SelectContent>
-                {nodes.length === 0 ? (
-                  <SelectItem value="none" disabled>
-                    暂无在线节点 (共{allNodes.length}个节点)
+        <div className="space-y-2">
+          <Label htmlFor="node">{isEdit ? "关联节点" : "选择节点"}</Label>
+          <Select
+            value={selectedNodeId}
+            onValueChange={(value) => setSelectedNodeId(value)}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="选择一个节点" />
+            </SelectTrigger>
+            <SelectContent>
+              {allNodes.length === 0 ? (
+                <SelectItem value="none" disabled>
+                  暂无节点
+                </SelectItem>
+              ) : (
+                allNodes.map((node) => (
+                  <SelectItem key={node.id} value={String(node.id)}>
+                    {node.name} ({node.host}:{node.port}) - {node.type} {node.status === 'online' ? '✅' : '⚠️离线'}
                   </SelectItem>
-                ) : (
-                  nodes.map((node) => (
-                    <SelectItem key={node.id} value={String(node.id)}>
-                      {node.name} ({node.host}:{node.port}) - {node.type}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-            {nodes.length === 0 && allNodes.length > 0 && (
-              <p className="text-xs text-yellow-400 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" />
-                有 {allNodes.length} 个节点但均不在线，请检查节点状态
-              </p>
-            )}
-            {allNodes.length === 0 && (
-              <p className="text-xs text-yellow-400 flex items-center gap-1">
-                <AlertCircle className="w-3 h-3" />
-                尚未添加任何节点，请先在节点管理页面添加节点
-              </p>
-            )}
-          </div>
-        )}
+                ))
+              )}
+            </SelectContent>
+          </Select>
+          {!isEdit && nodes.length === 0 && allNodes.length > 0 && (
+            <p className="text-xs text-yellow-400 flex items-center gap-1">
+              <AlertCircle className="w-3 h-3" />
+              有 {allNodes.length} 个节点但均不在线，请检查节点状态
+            </p>
+          )}
+          {allNodes.length === 0 && (
+            <p className="text-xs text-yellow-400 flex items-center gap-1">
+              <AlertCircle className="w-3 h-3" />
+              尚未添加任何节点，请先在节点管理页面添加节点
+            </p>
+          )}
+        </div>
         <div className="space-y-2">
           <Label htmlFor="remark">备注</Label>
           <Input

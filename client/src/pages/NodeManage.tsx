@@ -51,6 +51,7 @@ export default function NodeManage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [installScriptOpen, setInstallScriptOpen] = useState(false);
   const [installScript, setInstallScript] = useState("");
+  const [installOneLiner, setInstallOneLiner] = useState("");
   const [loadingScript, setLoadingScript] = useState(false);
   const [batchConfigOpen, setBatchConfigOpen] = useState(false);
   const [selectedNodes, setSelectedNodes] = useState<number[]>([]);
@@ -77,8 +78,16 @@ export default function NodeManage() {
     try {
       setLoadingScript(true);
       const response: any = await nodeService.generateInstallScript({ node_type: "both" });
-      const script = response?.data?.script || response?.script || "";
+      let script = response?.data?.script || response?.script || "";
+      let oneLiner = response?.data?.one_liner || response?.one_liner || "";
+      // 后端不检测 X-Forwarded-Proto，可能生成 http:// 的 PANEL_URL
+      // 如果当前页面是 HTTPS，则替换脚本中的 URL 为 HTTPS
+      if (window.location.protocol === 'https:') {
+        script = script.replace(/PANEL_URL="http:\/\//g, 'PANEL_URL="https://');
+        oneLiner = oneLiner.replace(/http:\/\//g, 'https://');
+      }
       setInstallScript(script);
+      setInstallOneLiner(oneLiner);
     } catch (error) {
       console.error("加载安装脚本失败:", error);
       toast.error("加载安装脚本失败");
@@ -484,85 +493,90 @@ export default function NodeManage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4 overflow-y-auto flex-1 min-h-0">
+            {/* 一键安装命令 */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between mb-2">
-                <Label className="text-white/90">安装命令（点击下方命令框复制）</Label>
+              <div className="flex items-center justify-between mb-1">
+                <Label className="text-white/90">一键安装命令（推荐）</Label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs text-cyan-400 hover:bg-cyan-500/20"
+                  onClick={async () => {
+                    if (!installOneLiner) {
+                      toast.error('安装命令未加载');
+                      return;
+                    }
+                    const success = await copyToClipboard(installOneLiner);
+                    if (success) {
+                      toast.success('一键安装命令已复制');
+                    } else {
+                      toast.error('复制失败');
+                    }
+                  }}
+                >
+                  <Copy className="w-3 h-3 mr-1" />
+                  复制
+                </Button>
               </div>
               <div 
-                className="bg-black/40 border border-white/10 rounded-lg p-4 font-mono text-sm text-cyan-400 overflow-x-auto cursor-pointer hover:border-cyan-500/50 transition-colors relative group"
-                onClick={async (e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  
-                  if (!installScript) {
-                    toast.error('安装脚本未加载');
+                className="bg-black/40 border border-cyan-500/30 rounded-lg p-4 font-mono text-sm text-cyan-400 overflow-x-auto cursor-pointer hover:border-cyan-500/50 transition-colors relative group"
+                onClick={async () => {
+                  if (!installOneLiner) {
+                    toast.error('安装命令未加载');
                     return;
                   }
-                  
-                  const success = await copyToClipboard(installScript);
+                  const success = await copyToClipboard(installOneLiner);
                   if (success) {
-                    toast.success('已复制到剪贴板');
+                    toast.success('一键安装命令已复制');
                   } else {
                     toast.error('复制失败');
                   }
                 }}
                 title="点击复制"
               >
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Copy className="w-4 h-4 text-cyan-400" />
-                </div>
                 {loadingScript ? (
-                  <div className="flex items-center justify-center py-4">
-                    <RefreshCw className="w-5 h-5 animate-spin text-cyan-400 mr-2" />
+                  <div className="flex items-center justify-center py-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-cyan-400 mr-2" />
                     <span>加载中...</span>
                   </div>
                 ) : (
-                  <pre className="whitespace-pre-wrap break-all">{installScript || "加载失败"}</pre>
+                  <code className="break-all">{installOneLiner || "加载失败"}</code>
                 )}
               </div>
+              <p className="text-xs text-white/50">复制上方命令，在服务器上以 root 用户运行即可自动安装</p>
             </div>
+
+            {/* 完整脚本（可展开） */}
+            <details className="group">
+              <summary className="cursor-pointer text-white/70 hover:text-white/90 text-sm flex items-center gap-2 py-2">
+                <Code className="w-4 h-4" />
+                查看完整脚本内容
+              </summary>
+              <div className="mt-2 bg-black/40 border border-white/10 rounded-lg p-4 font-mono text-xs text-green-400 overflow-x-auto max-h-[40vh] overflow-y-auto">
+                <pre className="whitespace-pre-wrap break-all">{installScript || "加载失败"}</pre>
+              </div>
+            </details>
+
             <div className="space-y-2">
               <Label className="text-white/90">使用说明</Label>
               <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-2 text-sm text-white/70">
-                <p>1. 点击上方命令框复制安装脚本</p>
-                <p>2. 在远程服务器上以root用户运行该命令</p>
-                <p>3. 脚本会自动安装Xray/Gost并注册到面板</p>
-                <p>4. <strong className="text-cyan-400">国内VPS自动使用镜像加速</strong>，无需手动配置</p>
-                <p>5. 支持的系统: Ubuntu, Debian, CentOS, RHEL | 架构: x86_64, aarch64</p>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-white/90">环境变量</Label>
-              <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-2 text-sm font-mono text-white/70">
-                <div className="flex justify-between">
-                  <span className="text-cyan-400">PANEL_URL</span>
-                  <span>面板地址 (必需)</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-cyan-400">API_TOKEN</span>
-                  <span>API认证令牌 (必需)</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-cyan-400">NODE_NAME</span>
-                  <span>节点名称 (可选,默认为主机名)</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-cyan-400">NODE_TYPE</span>
-                  <span>节点类型 (可选: xray, gost, both,默认both)</span>
-                </div>
+                <p>1. 复制上方“一键安装命令”，粘贴到服务器终端运行</p>
+                <p>2. 脚本会自动安装 Xray/Gost 并注册到面板</p>
+                <p>3. <strong className="text-cyan-400">国内VPS自动使用镜像加速</strong>，无需手动配置</p>
+                <p>4. 支持的系统: Ubuntu, Debian, CentOS, RHEL | 架构: x86_64, aarch64</p>
               </div>
             </div>
           </div>
           <div className="flex gap-2 flex-shrink-0 pt-4 border-t border-white/10">
             <Button
               onClick={async () => {
-                if (!installScript) {
-                  toast.error('安装脚本未加载');
+                if (!installOneLiner) {
+                  toast.error('安装命令未加载');
                   return;
                 }
-                const success = await copyToClipboard(installScript);
+                const success = await copyToClipboard(installOneLiner);
                 if (success) {
-                  toast.success('已复制到剪贴板');
+                  toast.success('一键安装命令已复制');
                 } else {
                   toast.error('复制失败');
                 }
@@ -571,11 +585,22 @@ export default function NodeManage() {
               className="flex-1 border-cyan-400/30 hover:bg-cyan-500/20 text-cyan-400"
             >
               <Copy className="w-4 h-4 mr-2" />
-              复制脚本
+              复制安装命令
             </Button>
             <Button
-              onClick={() => {
-                window.open(`${window.location.origin}/node-install.sh`, '_blank');
+              onClick={async () => {
+                if (!installScript) {
+                  toast.error('安装脚本未加载');
+                  return;
+                }
+                const blob = new Blob([installScript], { type: 'text/x-sh' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'node-install.sh';
+                a.click();
+                URL.revokeObjectURL(url);
+                toast.success('脚本已下载');
               }}
               variant="outline"
               className="flex-1 border-white/20 hover:bg-purple-500/20"

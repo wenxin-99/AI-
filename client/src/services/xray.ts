@@ -210,18 +210,25 @@ export const xrayService = {
   },
 
   // 生成 x25519 密钥对（前端生成，使用 tweetnacl，兼容 HTTP 环境）
+  // Xray Reality 使用 base64.RawURLEncoding 格式（无填充，URL安全字符）
   generateKeypair: async (): Promise<{ private_key: string; public_key: string }> => {
     // 动态导入 tweetnacl（避免全局引入）
     const nacl = await import('tweetnacl');
     // 生成 Curve25519 密钥对（用于 DH 密钥交换，与 xray x25519 命令等价）
     const keyPair = nacl.default.box.keyPair();
     
-    // 转为 Base64
-    const toBase64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
+    // 转为 Base64 RawURLEncoding（Xray x25519 要求的格式）
+    // 1. 标准 Base64 编码
+    // 2. 替换 + 为 -，/ 为 _（URL安全）
+    // 3. 去掉尾部 = 填充
+    const toBase64RawURL = (bytes: Uint8Array) => {
+      const standard = btoa(String.fromCharCode(...bytes));
+      return standard.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    };
     
     return {
-      private_key: toBase64(keyPair.secretKey),
-      public_key: toBase64(keyPair.publicKey),
+      private_key: toBase64RawURL(keyPair.secretKey),
+      public_key: toBase64RawURL(keyPair.publicKey),
     };
   },
 };
