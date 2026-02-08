@@ -462,9 +462,9 @@ func (nc *NodeController) GenerateInstallScript(c *gin.Context) {
 	rand.Read(token)
 	apiToken := hex.EncodeToString(token)
 
-	// 获取面板地址 - 从请求 Host 推断
+	// 获取面板地址 - 从请求 Host 推断（支持 Nginx 反向代理 TLS 终止）
 	scheme := "http"
-	if c.Request.TLS != nil {
+	if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
 		scheme = "https"
 	}
 	panelURL := fmt.Sprintf("%s://%s", scheme, c.Request.Host)
@@ -498,7 +498,7 @@ func (nc *NodeController) GetInstallScriptRaw(c *gin.Context) {
 	}
 
 	scheme := "http"
-	if c.Request.TLS != nil {
+	if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
 		scheme = "https"
 	}
 	panelURL := fmt.Sprintf("%s://%s", scheme, c.Request.Host)
@@ -777,6 +777,13 @@ func generateInstallScript(panelURL, apiToken, nodeName, nodeType string) string
 	sb.WriteString("INSTALL_DIR=\"/opt/uniproxy-node\"\n")
 	sb.WriteString("source $INSTALL_DIR/config/env.conf\n\n")
 
+	// 初始化日志文件
+	sb.WriteString("# 初始化日志文件\n")
+	sb.WriteString("mkdir -p $INSTALL_DIR/logs\n")
+	sb.WriteString("touch $INSTALL_DIR/logs/agent.log\n")
+	sb.WriteString("touch $INSTALL_DIR/logs/gost.log\n")
+	sb.WriteString("echo \"[$(date)] Agent 启动\" >> $INSTALL_DIR/logs/agent.log\n\n")
+
 	sb.WriteString("# 获取系统信息\n")
 	sb.WriteString("get_cpu_usage() {\n")
 	sb.WriteString("  top -bn1 | grep 'Cpu(s)' | awk '{print $2}' 2>/dev/null || echo \"0\"\n")
@@ -790,7 +797,7 @@ func generateInstallScript(panelURL, apiToken, nodeName, nodeType string) string
 	sb.WriteString("send_heartbeat() {\n")
 	sb.WriteString("  local cpu=$(get_cpu_usage)\n")
 	sb.WriteString("  local mem=$(get_mem_usage)\n")
-	sb.WriteString("  curl -sf -X POST \"${PANEL_URL}/api/v1/node/heartbeat\" \\\n")
+	sb.WriteString("  curl -sfL -X POST \"${PANEL_URL}/api/v1/node/heartbeat\" \\\n")
 	sb.WriteString("    -H \"X-API-Token: ${API_TOKEN}\" \\\n")
 	sb.WriteString("    -H \"Content-Type: application/json\" \\\n")
 	sb.WriteString("    -d \"{\\\"cpu_usage\\\": $cpu, \\\"memory_usage\\\": $mem, \\\"node_name\\\": \\\"${NODE_NAME}\\\"}\" \\\n")
@@ -799,7 +806,7 @@ func generateInstallScript(panelURL, apiToken, nodeName, nodeType string) string
 
 	sb.WriteString("# 拉取并应用 Gost 配置\n")
 	sb.WriteString("sync_gost_config() {\n")
-	sb.WriteString("  local response=$(curl -sf \"${PANEL_URL}/api/v1/node/config\" \\\n")
+	sb.WriteString("  local response=$(curl -sfL \"${PANEL_URL}/api/v1/node/config\" \\\n")
 	sb.WriteString("    -H \"X-API-Token: ${API_TOKEN}\" 2>/dev/null)\n")
 	sb.WriteString("  \n")
 	sb.WriteString("  if [[ -z \"$response\" ]]; then return 1; fi\n")
@@ -864,7 +871,7 @@ func generateInstallScript(panelURL, apiToken, nodeName, nodeType string) string
 	// 注册节点
 	sb.WriteString("# ===== 注册节点到面板 =====\n")
 	sb.WriteString("info \"注册节点到面板...\"\n")
-	sb.WriteString("REGISTER_RESULT=$(curl -sf -X POST \"${PANEL_URL}/api/v1/node/register\" \\\n")
+	sb.WriteString("REGISTER_RESULT=$(curl -sfL -X POST \"${PANEL_URL}/api/v1/node/register\" \\\n")
 	sb.WriteString("  -H \"X-API-Token: ${API_TOKEN}\" \\\n")
 	sb.WriteString("  -H \"Content-Type: application/json\" \\\n")
 	sb.WriteString("  -d \"{\\\"name\\\": \\\"${NODE_NAME}\\\", \\\"host\\\": \\\"${PUBLIC_IP}\\\", \\\"port\\\": ${NODE_PORT}, \\\"type\\\": \\\"${NODE_TYPE}\\\", \\\"api_token\\\": \\\"${API_TOKEN}\\\"}\")\n\n")
