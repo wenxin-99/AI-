@@ -892,9 +892,11 @@ export default function XrayManage() {
                 value={protocolSettings.ssMethod}
                 onValueChange={(value) => {
                   const newSettings = { ...protocolSettings, ssMethod: value };
-                  // 如果切换到 SS2022 且当前密码不是有效的 Base64，自动生成新密码
-                  if (isSS2022Method(value) && !isValidBase64(protocolSettings.ssPassword)) {
+                  // 切换加密方式时自动生成对应格式的密码
+                  if (isSS2022Method(value)) {
                     newSettings.ssPassword = generateSS2022Password();
+                  } else {
+                    newSettings.ssPassword = generateUUID();
                   }
                   setProtocolSettings(newSettings);
                 }}
