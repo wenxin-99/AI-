@@ -209,9 +209,19 @@ export const xrayService = {
     );
   },
 
-  // 生成 x25519 密钥对
+  // 生成 x25519 密钥对（前端生成，使用 tweetnacl，兼容 HTTP 环境）
   generateKeypair: async (): Promise<{ private_key: string; public_key: string }> => {
-    const response = await api.post("/api/v1/xray/generate-keypair");
-    return response?.data?.data || response?.data || response;
+    // 动态导入 tweetnacl（避免全局引入）
+    const nacl = await import('tweetnacl');
+    // 生成 Curve25519 密钥对（用于 DH 密钥交换，与 xray x25519 命令等价）
+    const keyPair = nacl.default.box.keyPair();
+    
+    // 转为 Base64
+    const toBase64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
+    
+    return {
+      private_key: toBase64(keyPair.secretKey),
+      public_key: toBase64(keyPair.publicKey),
+    };
   },
 };

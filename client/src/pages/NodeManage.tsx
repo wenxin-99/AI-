@@ -473,8 +473,8 @@ export default function NodeManage() {
 
       {/* 安装脚本对话框 */}
       <Dialog open={installScriptOpen} onOpenChange={setInstallScriptOpen}>
-        <DialogContent className="glass-card border-white/20 max-w-3xl">
-          <DialogHeader>
+        <DialogContent className="glass-card border-white/20 max-w-3xl max-h-[85vh] flex flex-col">
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle className="gradient-text flex items-center gap-2">
               <Code className="w-5 h-5" />
               节点安装脚本
@@ -483,7 +483,7 @@ export default function NodeManage() {
               在远程服务器上运行以下命令自动安装节点
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
+          <div className="space-y-4 py-4 overflow-y-auto flex-1 min-h-0">
             <div className="space-y-2">
               <div className="flex items-center justify-between mb-2">
                 <Label className="text-white/90">安装命令（点击下方命令框复制）</Label>
@@ -552,24 +552,43 @@ export default function NodeManage() {
                 </div>
               </div>
             </div>
-            <div className="flex gap-2">
-              <Button
-                onClick={() => {
-                  window.open(`${window.location.origin}/node-install.sh`, '_blank');
-                }}
-                variant="outline"
-                className="flex-1 border-white/20 hover:bg-purple-500/20"
-              >
-                <Download className="w-4 h-4 mr-2" />
-                下载脚本
-              </Button>
-              <Button
-                onClick={() => setInstallScriptOpen(false)}
-                className="flex-1 bg-gradient-to-r from-cyan-500 to-purple-500"
-              >
-                关闭
-              </Button>
-            </div>
+          </div>
+          <div className="flex gap-2 flex-shrink-0 pt-4 border-t border-white/10">
+            <Button
+              onClick={async () => {
+                if (!installScript) {
+                  toast.error('安装脚本未加载');
+                  return;
+                }
+                const success = await copyToClipboard(installScript);
+                if (success) {
+                  toast.success('已复制到剪贴板');
+                } else {
+                  toast.error('复制失败');
+                }
+              }}
+              variant="outline"
+              className="flex-1 border-cyan-400/30 hover:bg-cyan-500/20 text-cyan-400"
+            >
+              <Copy className="w-4 h-4 mr-2" />
+              复制脚本
+            </Button>
+            <Button
+              onClick={() => {
+                window.open(`${window.location.origin}/node-install.sh`, '_blank');
+              }}
+              variant="outline"
+              className="flex-1 border-white/20 hover:bg-purple-500/20"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              下载脚本
+            </Button>
+            <Button
+              onClick={() => setInstallScriptOpen(false)}
+              className="flex-1 bg-gradient-to-r from-cyan-500 to-purple-500"
+            >
+              关闭
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
