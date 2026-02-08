@@ -103,9 +103,9 @@ export const nodeService = {
     return response;
   },
 
-  // 生成安装脚本
+  // 生成安装脚本（POST 到新路由，避免 Gin 路由冲突）
   generateInstallScript: async (params: { node_type: string }) => {
-    const response = await apiClient.post("/api/v1/node/install-script", params);
+    const response = await apiClient.post("/api/v1/node-script/generate", params);
     return response;
   },
 };

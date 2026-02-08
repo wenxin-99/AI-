@@ -106,6 +106,7 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 				// Xray控制
 				xray.POST("/restart", xrayController.Restart)
 				xray.GET("/status", xrayController.GetStatus)
+				xray.POST("/generate-keypair", xrayController.GenerateKeypair)
 			}
 
 			// Gost管理
@@ -168,6 +169,7 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 				node.GET("/:id/stats", nodeController.GetNodeStats)
 				node.GET("/:id/health", nodeController.CheckNodeHealth)
 				node.POST("/batch-sync", nodeController.BatchSyncNodes)
+				node.GET("/generate-token", nodeController.GenerateAPIToken)
 			}
 
 			// BBR优化管理
@@ -194,6 +196,19 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		}
 
 		// 订阅公开接口(无需认证)
+		// 节点API接口(使用API Token认证)
+		nodeAPI := v1.Group("/node")
+		nodeAPI.Use(middleware.NodeAPIAuth(db))
+		{
+			nodeAPI.POST("/heartbeat", nodeController.Heartbeat)
+			nodeAPI.GET("/config", nodeController.GetNodeConfig)
+			nodeAPI.POST("/register", nodeController.RegisterNode)
+		}
+		// 节点安装脚本公开接口(供curl直接执行)
+		// 使用 /node-script/install 避免与 authenticated /node 路由组冲突
+		v1.GET("/node-script/install", nodeController.GetInstallScriptRaw)
+		// 同时支持 POST 方法（前端调用）
+		v1.POST("/node-script/generate", middleware.JWTAuth(cfg), nodeController.GenerateInstallScript)
 		v1.GET("/sub/:token", subscriptionController.GetSubscriptionByToken)
 	}
 
