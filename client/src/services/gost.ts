@@ -1,131 +1,137 @@
 import api from "@/lib/api";
 
-// ============ 类型定义 ============
-
-export interface GostForward {
+export interface GostTunnel {
   id: number;
-  tunnel_id: number;
   name: string;
-  in_port: number;
-  out_port: number;
+  protocol: string;
+  local_port: number;
   remote_addr: string;
+  remote_host: string;
+  remote_port: number;
+  username: string;
+  password: string;
+  speed_limit: number;
+  speed_limit_upload: number;
+  speed_limit_download: number;
   enable: boolean;
-  remark: string;
+  enabled?: boolean;
+  enable_tls: boolean;
+  certificate_id: number;
+  tls_server_name: string;
+  skip_verify: boolean;
   traffic_up: number;
   traffic_down: number;
   created_at: string;
   updated_at: string;
 }
 
-export interface GostTunnel {
-  id: number;
-  name: string;
-  in_node_id: number;
-  out_node_id: number;
-  type: number; // 1=直连, 2=隧道
-  protocol: string; // tcp, tls, ws, wss, quic
-  enable: boolean;
-  remark: string;
-  forwards: GostForward[];
-  created_at: string;
-  updated_at: string;
-}
-
 export interface CreateTunnelRequest {
   name: string;
-  in_node_id: number;
-  out_node_id: number;
-  type: number;
   protocol: string;
-  remark?: string;
-}
-
-export interface CreateForwardRequest {
-  tunnel_id: number;
-  name: string;
-  in_port: number;
-  out_port: number;
+  local_port: number;
   remote_addr: string;
-  remark?: string;
+  username?: string;
+  password?: string;
+  speed_limit?: number;
+  speed_limit_upload?: number;
+  speed_limit_download?: number;
+  enable_tls?: boolean;
+  certificate_id?: number;
+  tls_server_name?: string;
+  skip_verify?: boolean;
+  enable?: boolean;
 }
 
-// ============ 服务 ============
+// 规范化隧道数据
+function normalizeTunnel(tunnel: any): GostTunnel {
+  return {
+    ...tunnel,
+    enable: tunnel.enable ?? tunnel.enabled ?? true,
+    enabled: tunnel.enable ?? tunnel.enabled ?? true,
+  };
+}
+
+// 辅助函数：执行写操作（创建/更新/删除）
+// 后端在这些操作后会调用 Restart() 重启 Gost，可能导致请求超时
+async function executeWriteOperation<T>(
+  operation: () => Promise<T>,
+): Promise<{ success: boolean; data?: T; timedOut?: boolean }> {
+  try {
+    const data = await operation();
+    return { success: true, data };
+  } catch (error: any) {
+    // 检查是否是超时或网络错误（后端 Restart 导致连接断开）
+    if (
+      error.code === 'ECONNABORTED' ||
+      error.code === 'ERR_NETWORK' ||
+      error.message?.includes('timeout') ||
+      error.message?.includes('Network Error') ||
+      error.message?.includes('aborted') ||
+      !error.response
+    ) {
+      console.warn('Write operation may have succeeded but response timed out (backend restart)');
+      return { success: true, timedOut: true };
+    }
+    throw error;
+  }
+}
 
 export const gostService = {
-  // 获取隧道列表
-  getTunnels: async (page = 1, pageSize = 50): Promise<{ tunnels: GostTunnel[]; total: number }> => {
-    const response: any = await api.get("/api/v1/gost/tunnels", {
-      params: { page, page_size: pageSize },
-    });
-    const data = response?.data || response;
-    return {
-      tunnels: Array.isArray(data?.tunnels) ? data.tunnels : [],
-      total: data?.total || 0,
-    };
+  // 获取所有隧道
+  getTunnels: async (): Promise<GostTunnel[]> => {
+    const response: any = await api.get("/api/v1/gost/tunnels");
+    const tunnels = response?.data?.tunnels || response?.tunnels || [];
+    return Array.isArray(tunnels) ? tunnels.map(normalizeTunnel) : [];
   },
 
   // 获取单个隧道
   getTunnel: async (id: number): Promise<GostTunnel> => {
     const response: any = await api.get(`/api/v1/gost/tunnels/${id}`);
-    return response?.data || response;
+    return normalizeTunnel(response?.data || response);
   },
 
   // 创建隧道
-  createTunnel: async (data: CreateTunnelRequest): Promise<GostTunnel> => {
-    const response: any = await api.post("/api/v1/gost/tunnels", data);
-    return response?.data || response;
+  createTunnel: async (data: CreateTunnelRequest): Promise<{ timedOut?: boolean }> => {
+    const result = await executeWriteOperation(
+      () => api.post("/api/v1/gost/tunnels", data)
+    );
+    return { timedOut: result.timedOut };
   },
 
   // 更新隧道
-  updateTunnel: async (id: number, data: CreateTunnelRequest): Promise<GostTunnel> => {
-    const response: any = await api.put(`/api/v1/gost/tunnels/${id}`, data);
-    return response?.data || response;
+  updateTunnel: async (id: number, data: CreateTunnelRequest): Promise<{ timedOut?: boolean }> => {
+    const result = await executeWriteOperation(
+      () => api.put(`/api/v1/gost/tunnels/${id}`, data)
+    );
+    return { timedOut: result.timedOut };
   },
 
   // 删除隧道
-  deleteTunnel: async (id: number): Promise<void> => {
-    await api.delete(`/api/v1/gost/tunnels/${id}`);
+  deleteTunnel: async (id: number): Promise<{ timedOut?: boolean }> => {
+    const result = await executeWriteOperation(
+      () => api.delete(`/api/v1/gost/tunnels/${id}`)
+    );
+    return { timedOut: result.timedOut };
   },
 
   // 切换隧道状态
-  toggleTunnel: async (id: number): Promise<GostTunnel> => {
-    const response: any = await api.post(`/api/v1/gost/tunnels/${id}/toggle`);
+  toggleTunnel: async (id: number, enabled: boolean): Promise<{ timedOut?: boolean }> => {
+    const result = await executeWriteOperation(
+      () => api.put(`/api/v1/gost/tunnels/${id}`, { enable: enabled })
+    );
+    return { timedOut: result.timedOut };
+  },
+
+  // 获取 Gost 状态
+  getStatus: async (): Promise<any> => {
+    const response: any = await api.get("/api/v1/gost/status");
     return response?.data || response;
   },
 
-  // 获取转发规则列表
-  getForwards: async (tunnelId: number): Promise<GostForward[]> => {
-    const response: any = await api.get(`/api/v1/gost/tunnels/${tunnelId}/forwards`);
-    const data = response?.data || response;
-    return Array.isArray(data) ? data : [];
-  },
-
-  // 创建转发规则
-  createForward: async (data: CreateForwardRequest): Promise<GostForward> => {
-    const response: any = await api.post("/api/v1/gost/forwards", data);
-    return response?.data || response;
-  },
-
-  // 更新转发规则
-  updateForward: async (id: number, data: CreateForwardRequest): Promise<GostForward> => {
-    const response: any = await api.put(`/api/v1/gost/forwards/${id}`, data);
-    return response?.data || response;
-  },
-
-  // 删除转发规则
-  deleteForward: async (id: number): Promise<void> => {
-    await api.delete(`/api/v1/gost/forwards/${id}`);
-  },
-
-  // 切换转发规则状态
-  toggleForward: async (id: number): Promise<GostForward> => {
-    const response: any = await api.post(`/api/v1/gost/forwards/${id}/toggle`);
-    return response?.data || response;
-  },
-
-  // 预览节点 Gost 配置
-  previewConfig: async (nodeId: number): Promise<string> => {
-    const response: any = await api.get(`/api/v1/gost/config/preview/${nodeId}`);
-    return response?.data || response || "";
+  // 重启 Gost 服务
+  restart: async (): Promise<void> => {
+    await executeWriteOperation(
+      () => api.post("/api/v1/gost/restart")
+    );
   },
 };
