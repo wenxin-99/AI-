@@ -22,7 +22,8 @@ export default function Dashboard() {
   const [realtimeStats, setRealtimeStats] = useState<any>(null);
 
   // WebSocket 实时流量
-  const wsUrl = `ws://${window.location.hostname}:2053/ws/realtime-traffic`;
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${wsProtocol}//${window.location.host}/ws/realtime-traffic`;
   const { isConnected, lastMessage } = useWebSocket({
     url: wsUrl,
     onMessage: (data) => {

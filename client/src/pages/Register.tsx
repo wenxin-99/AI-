@@ -42,7 +42,7 @@ export default function Register() {
     setLoading(true);
 
     try {
-      const response = await fetch("http://localhost:2053/api/v1/register", {
+      const response = await fetch("/api/v1/register", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

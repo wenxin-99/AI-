@@ -91,6 +91,7 @@ export default function GostManage() {
   // 独立转发规则对话框
   const [forwardDialogOpen, setForwardDialogOpen] = useState(false);
   const [editingForward, setEditingForward] = useState<GostForward | null>(null);
+  const [forwardTunnelType, setForwardTunnelType] = useState<number>(2); // track parent tunnel type for standalone dialog
   const [forwardForm, setForwardForm] = useState<CreateForwardRequest>({
     tunnel_id: 0,
     name: "",
@@ -127,6 +128,8 @@ export default function GostManage() {
   }, [fetchData]);
 
   // ============ 工具函数 ============
+
+  const isDirectMode = (type: number | string) => String(type) === "1";
 
   const getNodeName = (nodeId: number) => {
     const node = nodes.find((n) => n.id === nodeId);
@@ -202,15 +205,24 @@ export default function GostManage() {
 
   const handleSaveTunnel = async () => {
     if (!tunnelForm.name) { toast.error("请输入隧道名称"); return; }
-    if (!tunnelForm.in_node_id || !tunnelForm.out_node_id) { toast.error("请选择入口节点和出口节点"); return; }
+    if (!tunnelForm.in_node_id) { toast.error("请选择入口节点"); return; }
     if (!nodes.find(n => n.id === tunnelForm.in_node_id)) { toast.error("入口节点已被删除，请重新选择"); return; }
-    if (!nodes.find(n => n.id === tunnelForm.out_node_id)) { toast.error("出口节点已被删除，请重新选择"); return; }
-    if (tunnelForm.in_node_id === tunnelForm.out_node_id) { toast.error("入口节点和出口节点不能相同"); return; }
+
+    const isDirect = isDirectMode(tunnelForm.type);
+
+    // 加密隧道模式需要出口节点
+    if (!isDirect) {
+      if (!tunnelForm.out_node_id) { toast.error("请选择出口节点"); return; }
+      if (!nodes.find(n => n.id === tunnelForm.out_node_id)) { toast.error("出口节点已被删除，请重新选择"); return; }
+      if (tunnelForm.in_node_id === tunnelForm.out_node_id) { toast.error("入口节点和出口节点不能相同"); return; }
+    }
 
     const validForwards = inlineForwards.filter((f) => f.in_port > 0 || f.remote_addr);
     for (const f of validForwards) {
       if (!f.in_port || f.in_port < 1 || f.in_port > 65535) { toast.error(`规则 "${f.name}": 入口端口无效`); return; }
-      if (!f.out_port || f.out_port < 1 || f.out_port > 65535) { toast.error(`规则 "${f.name}": 中转端口无效`); return; }
+      if (!isDirect) {
+        if (!f.out_port || f.out_port < 1 || f.out_port > 65535) { toast.error(`规则 "${f.name}": 中转端口无效`); return; }
+      }
       if (!f.remote_addr) { toast.error(`规则 "${f.name}": 请填写落地地址`); return; }
     }
 
@@ -218,8 +230,14 @@ export default function GostManage() {
       setSaving(true);
       let tunnelId: number;
 
+      // 直连模式下，out_node_id 设为 in_node_id（后端需要非零值）
+      const submitForm = {
+        ...tunnelForm,
+        out_node_id: isDirect ? (tunnelForm.out_node_id || tunnelForm.in_node_id) : tunnelForm.out_node_id,
+      };
+
       if (editingTunnel) {
-        await gostService.updateTunnel(editingTunnel.id, { ...tunnelForm, enable: editingTunnel.enable });
+        await gostService.updateTunnel(editingTunnel.id, { ...submitForm, enable: editingTunnel.enable });
         tunnelId = editingTunnel.id;
         toast.success("隧道更新成功");
 
@@ -230,18 +248,27 @@ export default function GostManage() {
         }
 
         for (const f of validForwards) {
+          const fwdData = {
+            tunnel_id: tunnelId, name: f.name, in_port: f.in_port,
+            out_port: isDirect ? f.in_port : f.out_port, // 直连模式下 out_port = in_port
+            remote_addr: f.remote_addr, remark: f.remark,
+          };
           if (f.id) {
-            await gostService.updateForward(f.id, { tunnel_id: tunnelId, name: f.name, in_port: f.in_port, out_port: f.out_port, remote_addr: f.remote_addr, remark: f.remark });
+            await gostService.updateForward(f.id, fwdData);
           } else {
-            await gostService.createForward({ tunnel_id: tunnelId, name: f.name, in_port: f.in_port, out_port: f.out_port, remote_addr: f.remote_addr, remark: f.remark });
+            await gostService.createForward(fwdData);
           }
         }
       } else {
-        const created = await gostService.createTunnel(tunnelForm);
+        const created = await gostService.createTunnel(submitForm);
         tunnelId = created.id;
         toast.success("隧道创建成功");
         for (const f of validForwards) {
-          await gostService.createForward({ tunnel_id: tunnelId, name: f.name, in_port: f.in_port, out_port: f.out_port, remote_addr: f.remote_addr, remark: f.remark });
+          await gostService.createForward({
+            tunnel_id: tunnelId, name: f.name, in_port: f.in_port,
+            out_port: isDirect ? f.in_port : f.out_port,
+            remote_addr: f.remote_addr, remark: f.remark,
+          });
         }
       }
 
@@ -273,12 +300,16 @@ export default function GostManage() {
   // ============ 独立转发规则 ============
 
   const openCreateForward = (tunnelId: number) => {
+    const tunnel = tunnels.find(t => t.id === tunnelId);
+    setForwardTunnelType(tunnel ? Number(tunnel.type) || 2 : 2);
     setEditingForward(null);
     setForwardForm({ tunnel_id: tunnelId, name: "", in_port: 0, out_port: 0, remote_addr: "", remark: "" });
     setForwardDialogOpen(true);
   };
 
   const openEditForward = (forward: GostForward) => {
+    const tunnel = tunnels.find(t => t.id === forward.tunnel_id);
+    setForwardTunnelType(tunnel ? Number(tunnel.type) || 2 : 2);
     setEditingForward(forward);
     setForwardForm({ tunnel_id: forward.tunnel_id, name: forward.name, in_port: forward.in_port, out_port: forward.out_port, remote_addr: forward.remote_addr, remark: forward.remark || "" });
     setForwardDialogOpen(true);
@@ -287,12 +318,20 @@ export default function GostManage() {
   const handleSaveForward = async () => {
     if (!forwardForm.name) { toast.error("请输入规则名称"); return; }
     if (!forwardForm.in_port || forwardForm.in_port < 1 || forwardForm.in_port > 65535) { toast.error("入口端口无效"); return; }
-    if (!forwardForm.out_port || forwardForm.out_port < 1 || forwardForm.out_port > 65535) { toast.error("中转端口无效"); return; }
+    const isDirect = isDirectMode(forwardTunnelType);
+    if (!isDirect) {
+      if (!forwardForm.out_port || forwardForm.out_port < 1 || forwardForm.out_port > 65535) { toast.error("中转端口无效"); return; }
+    }
     if (!forwardForm.remote_addr) { toast.error("请填写落地地址"); return; }
 
+    const submitData = {
+      ...forwardForm,
+      out_port: isDirect ? forwardForm.in_port : forwardForm.out_port,
+    };
+
     try {
-      if (editingForward) { await gostService.updateForward(editingForward.id, forwardForm); toast.success("转发规则更新成功"); }
-      else { await gostService.createForward(forwardForm); toast.success("转发规则创建成功"); }
+      if (editingForward) { await gostService.updateForward(editingForward.id, submitData); toast.success("转发规则更新成功"); }
+      else { await gostService.createForward(submitData); toast.success("转发规则创建成功"); }
       setForwardDialogOpen(false);
       fetchData();
     } catch { toast.error(editingForward ? "更新失败" : "创建失败"); }
@@ -305,7 +344,6 @@ export default function GostManage() {
   };
 
   const handleToggleForward = async (id: number, _currentEnable: boolean) => {
-    // Find the full forward object from tunnels data
     let forward: GostForward | undefined;
     for (const t of tunnels) {
       forward = (t.forwards || []).find(f => f.id === id);
@@ -332,6 +370,9 @@ export default function GostManage() {
   const outNodeName = tunnelForm.out_node_id ? getNodeName(tunnelForm.out_node_id) : "出口节点";
   const inNodeHost = tunnelForm.in_node_id ? getNodeHost(tunnelForm.in_node_id) : "入口IP";
   const outNodeHost = tunnelForm.out_node_id ? getNodeHost(tunnelForm.out_node_id) : "出口IP";
+
+  // 当前对话框是否直连模式
+  const dialogIsDirect = isDirectMode(tunnelForm.type);
 
   return (
     <DashboardLayout>
@@ -397,6 +438,7 @@ export default function GostManage() {
               {tunnels.map((tunnel) => {
                 const isExpanded = expandedTunnels.has(tunnel.id);
                 const forwards = tunnel.forwards || [];
+                const tunnelIsDirect = isDirectMode(tunnel.type);
                 return (
                   <div key={tunnel.id}>
                     {/* Tunnel row */}
@@ -407,8 +449,8 @@ export default function GostManage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium text-white/90 truncate">{tunnel.name}</span>
-                          <Badge variant="outline" className={String(tunnel.type) === "2" ? "text-cyan-400 border-cyan-500/30 text-xs" : "text-amber-400 border-amber-500/30 text-xs"}>
-                            {String(tunnel.type) === "2" ? "加密隧道" : "直连"}
+                          <Badge variant="outline" className={tunnelIsDirect ? "text-amber-400 border-amber-500/30 text-xs" : "text-cyan-400 border-cyan-500/30 text-xs"}>
+                            {tunnelIsDirect ? "直连" : "加密隧道"}
                           </Badge>
                           <Badge variant="outline" className="text-white/50 border-white/10 text-xs">{tunnel.protocol.toUpperCase()}</Badge>
                           <Badge className={tunnel.enable ? "bg-green-500/20 text-green-400 border-green-500/30 text-xs" : "bg-red-500/20 text-red-400 border-red-500/30 text-xs"}>
@@ -417,8 +459,18 @@ export default function GostManage() {
                         </div>
                         <div className="text-xs text-white/40 mt-1 flex items-center gap-1 flex-wrap">
                           <span className="text-cyan-400/70">{getNodeName(tunnel.in_node_id)}</span>
-                          <ArrowRight className="w-3 h-3 text-white/30" />
-                          <span className="text-purple-400/70">{getNodeName(tunnel.out_node_id)}</span>
+                          {!tunnelIsDirect && (
+                            <>
+                              <ArrowRight className="w-3 h-3 text-white/30" />
+                              <span className="text-purple-400/70">{getNodeName(tunnel.out_node_id)}</span>
+                            </>
+                          )}
+                          {tunnelIsDirect && (
+                            <>
+                              <ArrowRight className="w-3 h-3 text-white/30" />
+                              <span className="text-amber-400/70">直连落地</span>
+                            </>
+                          )}
                           <span className="text-white/30 ml-2">· {forwards.length} 条转发</span>
                         </div>
                       </div>
@@ -438,9 +490,11 @@ export default function GostManage() {
                             <Button variant="outline" size="sm" className="h-7 text-xs border-white/10" onClick={() => handlePreviewConfig(tunnel.in_node_id)}>
                               <Eye className="w-3 h-3 mr-1" />入口配置
                             </Button>
-                            <Button variant="outline" size="sm" className="h-7 text-xs border-white/10" onClick={() => handlePreviewConfig(tunnel.out_node_id)}>
-                              <Eye className="w-3 h-3 mr-1" />出口配置
-                            </Button>
+                            {!tunnelIsDirect && (
+                              <Button variant="outline" size="sm" className="h-7 text-xs border-white/10" onClick={() => handlePreviewConfig(tunnel.out_node_id)}>
+                                <Eye className="w-3 h-3 mr-1" />出口配置
+                              </Button>
+                            )}
                             <Button size="sm" className="h-7 text-xs bg-cyan-600 hover:bg-cyan-700" onClick={() => openCreateForward(tunnel.id)}>
                               <Plus className="w-3 h-3 mr-1" />添加规则
                             </Button>
@@ -455,7 +509,7 @@ export default function GostManage() {
                                 <TableRow className="border-white/5 hover:bg-transparent">
                                   <TableHead className="text-white/60 pl-10">名称</TableHead>
                                   <TableHead className="text-white/60">入口端口</TableHead>
-                                  <TableHead className="text-white/60">中转端口</TableHead>
+                                  {!tunnelIsDirect && <TableHead className="text-white/60">中转端口</TableHead>}
                                   <TableHead className="text-white/60">落地地址</TableHead>
                                   <TableHead className="text-white/60">流量</TableHead>
                                   <TableHead className="text-white/60">状态</TableHead>
@@ -469,9 +523,11 @@ export default function GostManage() {
                                     <TableCell>
                                       <code className="text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded text-xs">:{fwd.in_port}</code>
                                     </TableCell>
-                                    <TableCell>
-                                      <code className="text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded text-xs">:{fwd.out_port}</code>
-                                    </TableCell>
+                                    {!tunnelIsDirect && (
+                                      <TableCell>
+                                        <code className="text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded text-xs">:{fwd.out_port}</code>
+                                      </TableCell>
+                                    )}
                                     <TableCell>
                                       <code className="text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded text-xs">{fwd.remote_addr}</code>
                                     </TableCell>
@@ -526,49 +582,15 @@ export default function GostManage() {
                   <Input placeholder="例如: HK-US-TLS" value={tunnelForm.name} onChange={(e) => setTunnelForm({ ...tunnelForm, name: e.target.value })} />
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>入口节点</Label>
-                    <Select value={tunnelForm.in_node_id ? tunnelForm.in_node_id.toString() : "placeholder"} onValueChange={(v) => v !== "placeholder" && setTunnelForm({ ...tunnelForm, in_node_id: parseInt(v) })}>
-                      <SelectTrigger className={tunnelForm.in_node_id && !nodes.find(n => n.id === tunnelForm.in_node_id) ? "border-red-500/50" : ""}><SelectValue placeholder="选择入口节点" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="placeholder" disabled>选择入口节点</SelectItem>
-                        {tunnelForm.in_node_id > 0 && !nodes.find(n => n.id === tunnelForm.in_node_id) && (
-                          <SelectItem value={tunnelForm.in_node_id.toString()} disabled className="text-red-400">⚠ 已删除的节点 #{tunnelForm.in_node_id}（请重新选择）</SelectItem>
-                        )}
-                        {nodes.map((n) => (<SelectItem key={n.id} value={n.id.toString()}>{n.name} ({n.host})</SelectItem>))}
-                      </SelectContent>
-                    </Select>
-                    {tunnelForm.in_node_id > 0 && !nodes.find(n => n.id === tunnelForm.in_node_id) && (
-                      <p className="text-xs text-red-400">该节点已被删除，请重新选择入口节点</p>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    <Label>出口节点</Label>
-                    <Select value={tunnelForm.out_node_id ? tunnelForm.out_node_id.toString() : "placeholder"} onValueChange={(v) => v !== "placeholder" && setTunnelForm({ ...tunnelForm, out_node_id: parseInt(v) })}>
-                      <SelectTrigger className={tunnelForm.out_node_id && !nodes.find(n => n.id === tunnelForm.out_node_id) ? "border-red-500/50" : ""}><SelectValue placeholder="选择出口节点" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="placeholder" disabled>选择出口节点</SelectItem>
-                        {tunnelForm.out_node_id > 0 && !nodes.find(n => n.id === tunnelForm.out_node_id) && (
-                          <SelectItem value={tunnelForm.out_node_id.toString()} disabled className="text-red-400">⚠ 已删除的节点 #{tunnelForm.out_node_id}（请重新选择）</SelectItem>
-                        )}
-                        {nodes.map((n) => (<SelectItem key={n.id} value={n.id.toString()}>{n.name} ({n.host})</SelectItem>))}
-                      </SelectContent>
-                    </Select>
-                    {tunnelForm.out_node_id > 0 && !nodes.find(n => n.id === tunnelForm.out_node_id) && (
-                      <p className="text-xs text-red-400">该节点已被删除，请重新选择出口节点</p>
-                    )}
-                  </div>
-                </div>
-
+                {/* 隧道类型和协议 - 放在节点选择之前，因为类型决定是否需要出口节点 */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label>隧道类型</Label>
                     <Select value={tunnelForm.type.toString()} onValueChange={(v) => setTunnelForm({ ...tunnelForm, type: parseInt(v) })}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="2">隧道转发（加密）</SelectItem>
                         <SelectItem value="1">端口转发（直连）</SelectItem>
+                        <SelectItem value="2">隧道转发（加密）</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -587,6 +609,44 @@ export default function GostManage() {
                   </div>
                 </div>
 
+                {/* 节点选择 */}
+                <div className={`grid grid-cols-1 ${dialogIsDirect ? "" : "sm:grid-cols-2"} gap-4`}>
+                  <div className="space-y-2">
+                    <Label>{dialogIsDirect ? "转发节点" : "入口节点"}</Label>
+                    <Select value={tunnelForm.in_node_id ? tunnelForm.in_node_id.toString() : "placeholder"} onValueChange={(v) => v !== "placeholder" && setTunnelForm({ ...tunnelForm, in_node_id: parseInt(v) })}>
+                      <SelectTrigger className={tunnelForm.in_node_id && !nodes.find(n => n.id === tunnelForm.in_node_id) ? "border-red-500/50" : ""}><SelectValue placeholder={dialogIsDirect ? "选择转发节点" : "选择入口节点"} /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="placeholder" disabled>{dialogIsDirect ? "选择转发节点" : "选择入口节点"}</SelectItem>
+                        {tunnelForm.in_node_id > 0 && !nodes.find(n => n.id === tunnelForm.in_node_id) && (
+                          <SelectItem value={tunnelForm.in_node_id.toString()} disabled className="text-red-400">⚠ 已删除的节点 #{tunnelForm.in_node_id}（请重新选择）</SelectItem>
+                        )}
+                        {nodes.map((n) => (<SelectItem key={n.id} value={n.id.toString()}>{n.name} ({n.host})</SelectItem>))}
+                      </SelectContent>
+                    </Select>
+                    {tunnelForm.in_node_id > 0 && !nodes.find(n => n.id === tunnelForm.in_node_id) && (
+                      <p className="text-xs text-red-400">该节点已被删除，请重新选择</p>
+                    )}
+                  </div>
+                  {!dialogIsDirect && (
+                    <div className="space-y-2">
+                      <Label>出口节点</Label>
+                      <Select value={tunnelForm.out_node_id ? tunnelForm.out_node_id.toString() : "placeholder"} onValueChange={(v) => v !== "placeholder" && setTunnelForm({ ...tunnelForm, out_node_id: parseInt(v) })}>
+                        <SelectTrigger className={tunnelForm.out_node_id && !nodes.find(n => n.id === tunnelForm.out_node_id) ? "border-red-500/50" : ""}><SelectValue placeholder="选择出口节点" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="placeholder" disabled>选择出口节点</SelectItem>
+                          {tunnelForm.out_node_id > 0 && !nodes.find(n => n.id === tunnelForm.out_node_id) && (
+                            <SelectItem value={tunnelForm.out_node_id.toString()} disabled className="text-red-400">⚠ 已删除的节点 #{tunnelForm.out_node_id}（请重新选择）</SelectItem>
+                          )}
+                          {nodes.map((n) => (<SelectItem key={n.id} value={n.id.toString()}>{n.name} ({n.host})</SelectItem>))}
+                        </SelectContent>
+                      </Select>
+                      {tunnelForm.out_node_id > 0 && !nodes.find(n => n.id === tunnelForm.out_node_id) && (
+                        <p className="text-xs text-red-400">该节点已被删除，请重新选择出口节点</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 <div className="space-y-2">
                   <Label>备注（可选）</Label>
                   <Input placeholder="隧道用途说明" value={tunnelForm.remark || ""} onChange={(e) => setTunnelForm({ ...tunnelForm, remark: e.target.value })} />
@@ -596,7 +656,7 @@ export default function GostManage() {
               {/* 分割线 */}
               <div className="border-t border-white/10" />
 
-              {/* 转发规则 - 入口→中转→落地 三段式 */}
+              {/* 转发规则 */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-sm font-medium text-white/70">
@@ -617,17 +677,27 @@ export default function GostManage() {
                       <span className="text-white/30">用户连接的端口</span>
                     </div>
                     <ArrowRight className="w-3 h-3 text-white/20" />
-                    <div className="flex items-center gap-1.5">
-                      <Server className="w-3.5 h-3.5 text-amber-400" />
-                      <span className="text-amber-400 font-medium">中转</span>
-                      <span className="text-white/30">{tunnelForm.protocol.toUpperCase()} 加密隧道端口</span>
-                    </div>
-                    <ArrowRight className="w-3 h-3 text-white/20" />
-                    <div className="flex items-center gap-1.5">
-                      <Globe className="w-3.5 h-3.5 text-purple-400" />
-                      <span className="text-purple-400 font-medium">落地</span>
-                      <span className="text-white/30">最终目标地址</span>
-                    </div>
+                    {dialogIsDirect ? (
+                      <div className="flex items-center gap-1.5">
+                        <Globe className="w-3.5 h-3.5 text-purple-400" />
+                        <span className="text-purple-400 font-medium">落地</span>
+                        <span className="text-white/30">直接转发到目标地址</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center gap-1.5">
+                          <Server className="w-3.5 h-3.5 text-amber-400" />
+                          <span className="text-amber-400 font-medium">中转</span>
+                          <span className="text-white/30">{tunnelForm.protocol.toUpperCase()} 加密隧道端口</span>
+                        </div>
+                        <ArrowRight className="w-3 h-3 text-white/20" />
+                        <div className="flex items-center gap-1.5">
+                          <Globe className="w-3.5 h-3.5 text-purple-400" />
+                          <span className="text-purple-400 font-medium">落地</span>
+                          <span className="text-white/30">最终目标地址</span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -652,9 +722,9 @@ export default function GostManage() {
                           )}
                         </div>
 
-                        {/* 三段式布局 */}
+                        {/* 转发规则字段 - 根据模式显示不同布局 */}
                         <div className="p-4 space-y-4">
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div className={`grid grid-cols-1 ${dialogIsDirect ? "sm:grid-cols-2" : "sm:grid-cols-3"} gap-4`}>
                             {/* 入口 */}
                             <div className="space-y-2">
                               <div className="flex items-center gap-1.5">
@@ -669,27 +739,29 @@ export default function GostManage() {
                                 onChange={(e) => updateInlineForward(index, "in_port", parseInt(e.target.value) || 0)}
                               />
                               <p className="text-[11px] text-white/30 leading-tight">
-                                用户连接 <span className="text-cyan-400/60">{inNodeHost}:{fwd.in_port || "端口"}</span> 来使用隧道
+                                用户连接 <span className="text-cyan-400/60">{inNodeHost}:{fwd.in_port || "端口"}</span> 来使用{dialogIsDirect ? "转发" : "隧道"}
                               </p>
                             </div>
 
-                            {/* 中转 */}
-                            <div className="space-y-2">
-                              <div className="flex items-center gap-1.5">
-                                <Server className="w-3.5 h-3.5 text-amber-400" />
-                                <Label className="text-xs text-amber-400 font-medium">中转端口</Label>
+                            {/* 中转 - 仅加密隧道模式显示 */}
+                            {!dialogIsDirect && (
+                              <div className="space-y-2">
+                                <div className="flex items-center gap-1.5">
+                                  <Server className="w-3.5 h-3.5 text-amber-400" />
+                                  <Label className="text-xs text-amber-400 font-medium">中转端口</Label>
+                                </div>
+                                <Input
+                                  type="number"
+                                  placeholder="18000"
+                                  className="h-9 text-sm border-amber-500/20 focus:border-amber-500/50"
+                                  value={fwd.out_port || ""}
+                                  onChange={(e) => updateInlineForward(index, "out_port", parseInt(e.target.value) || 0)}
+                                />
+                                <p className="text-[11px] text-white/30 leading-tight">
+                                  出口节点 <span className="text-amber-400/60">{outNodeHost}:{fwd.out_port || "端口"}</span> 接收加密流量
+                                </p>
                               </div>
-                              <Input
-                                type="number"
-                                placeholder="18000"
-                                className="h-9 text-sm border-amber-500/20 focus:border-amber-500/50"
-                                value={fwd.out_port || ""}
-                                onChange={(e) => updateInlineForward(index, "out_port", parseInt(e.target.value) || 0)}
-                              />
-                              <p className="text-[11px] text-white/30 leading-tight">
-                                出口节点 <span className="text-amber-400/60">{outNodeHost}:{fwd.out_port || "端口"}</span> 接收加密流量
-                              </p>
-                            </div>
+                            )}
 
                             {/* 落地 */}
                             <div className="space-y-2">
@@ -718,17 +790,25 @@ export default function GostManage() {
                                   {inNodeHost}:{fwd.in_port || "?"}
                                 </code>
                                 <ArrowRight className="w-3 h-3 text-white/30" />
-                                <span className="text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded text-[11px]">
-                                  {tunnelForm.protocol.toUpperCase()} 加密
-                                </span>
-                                <ArrowRight className="w-3 h-3 text-white/30" />
-                                <code className="text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded font-mono">
-                                  {outNodeHost}:{fwd.out_port || "?"}
-                                </code>
-                                <ArrowRight className="w-3 h-3 text-white/30" />
-                                <code className="text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded font-mono">
-                                  {fwd.remote_addr || "落地地址"}
-                                </code>
+                                {dialogIsDirect ? (
+                                  <code className="text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded font-mono">
+                                    {fwd.remote_addr || "落地地址"}
+                                  </code>
+                                ) : (
+                                  <>
+                                    <span className="text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded text-[11px]">
+                                      {tunnelForm.protocol.toUpperCase()} 加密
+                                    </span>
+                                    <ArrowRight className="w-3 h-3 text-white/30" />
+                                    <code className="text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded font-mono">
+                                      {outNodeHost}:{fwd.out_port || "?"}
+                                    </code>
+                                    <ArrowRight className="w-3 h-3 text-white/30" />
+                                    <code className="text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded font-mono">
+                                      {fwd.remote_addr || "落地地址"}
+                                    </code>
+                                  </>
+                                )}
                               </div>
                             </div>
                           )}
@@ -740,12 +820,12 @@ export default function GostManage() {
               </div>
 
               {/* 模式提示 */}
-              {tunnelForm.type === 1 && (
-                <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
-                  <p className="text-sm text-yellow-400">直连模式：流量不经过加密隧道，入口节点直接转发到目标地址。</p>
+              {dialogIsDirect && (
+                <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                  <p className="text-sm text-amber-400">直连模式：入口节点直接将流量转发到落地地址，不经过加密隧道，无需出口节点。</p>
                 </div>
               )}
-              {tunnelForm.type === 2 && (
+              {!dialogIsDirect && (
                 <div className="p-3 rounded-lg bg-cyan-500/10 border border-cyan-500/20">
                   <p className="text-sm text-cyan-400">
                     隧道模式：用户连接入口节点端口 → 通过 {tunnelForm.protocol.toUpperCase()} 加密传输到出口节点 → 出口节点转发到落地地址。
@@ -768,7 +848,11 @@ export default function GostManage() {
           <DialogContent className="bg-card/95 backdrop-blur-xl border-white/10 max-w-lg">
             <DialogHeader>
               <DialogTitle>{editingForward ? "编辑转发规则" : "添加转发规则"}</DialogTitle>
-              <DialogDescription>配置转发路径：入口 → 中转 → 落地</DialogDescription>
+              <DialogDescription>
+                {isDirectMode(forwardTunnelType)
+                  ? "配置转发路径：入口 → 落地"
+                  : "配置转发路径：入口 → 中转 → 落地"}
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-4">
               <div className="space-y-2">
@@ -783,18 +867,20 @@ export default function GostManage() {
                   <Label className="text-cyan-400">入口端口</Label>
                 </div>
                 <Input type="number" placeholder="10000" value={forwardForm.in_port || ""} onChange={(e) => setForwardForm({ ...forwardForm, in_port: parseInt(e.target.value) || 0 })} />
-                <p className="text-xs text-white/40">入口节点上监听的端口，用户连接此端口来使用隧道</p>
+                <p className="text-xs text-white/40">{isDirectMode(forwardTunnelType) ? "转发节点上监听的端口" : "入口节点上监听的端口，用户连接此端口来使用隧道"}</p>
               </div>
 
-              {/* 中转 */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-1.5">
-                  <Server className="w-3.5 h-3.5 text-amber-400" />
-                  <Label className="text-amber-400">中转端口</Label>
+              {/* 中转 - 仅加密隧道模式 */}
+              {!isDirectMode(forwardTunnelType) && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    <Server className="w-3.5 h-3.5 text-amber-400" />
+                    <Label className="text-amber-400">中转端口</Label>
+                  </div>
+                  <Input type="number" placeholder="18000" value={forwardForm.out_port || ""} onChange={(e) => setForwardForm({ ...forwardForm, out_port: parseInt(e.target.value) || 0 })} />
+                  <p className="text-xs text-white/40">出口节点上的加密隧道端口，接收来自入口节点的加密流量</p>
                 </div>
-                <Input type="number" placeholder="18000" value={forwardForm.out_port || ""} onChange={(e) => setForwardForm({ ...forwardForm, out_port: parseInt(e.target.value) || 0 })} />
-                <p className="text-xs text-white/40">出口节点上的加密隧道端口，接收来自入口节点的加密流量</p>
-              </div>
+              )}
 
               {/* 落地 */}
               <div className="space-y-2">
@@ -803,7 +889,7 @@ export default function GostManage() {
                   <Label className="text-purple-400">落地地址</Label>
                 </div>
                 <Input placeholder="127.0.0.1:8080 或 example.com:443" value={forwardForm.remote_addr} onChange={(e) => setForwardForm({ ...forwardForm, remote_addr: e.target.value })} />
-                <p className="text-xs text-white/40">出口节点最终转发到的目标地址，格式: 地址:端口</p>
+                <p className="text-xs text-white/40">{isDirectMode(forwardTunnelType) ? "直接转发到的目标地址，格式: 地址:端口" : "出口节点最终转发到的目标地址，格式: 地址:端口"}</p>
               </div>
 
               <div className="space-y-2">
@@ -817,11 +903,17 @@ export default function GostManage() {
                 <div className="flex items-center gap-1.5 text-xs flex-wrap">
                   <code className="text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded">入口:{forwardForm.in_port || "?"}</code>
                   <ArrowRight className="w-3 h-3 text-white/30" />
-                  <span className="text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">加密隧道</span>
-                  <ArrowRight className="w-3 h-3 text-white/30" />
-                  <code className="text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">中转:{forwardForm.out_port || "?"}</code>
-                  <ArrowRight className="w-3 h-3 text-white/30" />
-                  <code className="text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">{forwardForm.remote_addr || "落地地址"}</code>
+                  {isDirectMode(forwardTunnelType) ? (
+                    <code className="text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">{forwardForm.remote_addr || "落地地址"}</code>
+                  ) : (
+                    <>
+                      <span className="text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">加密隧道</span>
+                      <ArrowRight className="w-3 h-3 text-white/30" />
+                      <code className="text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded">中转:{forwardForm.out_port || "?"}</code>
+                      <ArrowRight className="w-3 h-3 text-white/30" />
+                      <code className="text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">{forwardForm.remote_addr || "落地地址"}</code>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
