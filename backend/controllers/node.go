@@ -70,7 +70,7 @@ func (nc *NodeController) Heartbeat(c *gin.Context) {
 	}
 
 	// 更新节点状态
-	if err := nc.nodeService.HandleHeartbeat(node.ID, req.CPUUsage, req.MemoryUsage, req.TrafficUp, req.TrafficDown); err != nil {
+	if err := nc.nodeService.UpdateNodeStatus(node.ID, "online", req.CPUUsage, req.MemoryUsage, 0); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
 			"message": "更新节点状态失败: " + err.Error(),
@@ -78,9 +78,10 @@ func (nc *NodeController) Heartbeat(c *gin.Context) {
 		return
 	}
 
-	// 检查是否有新配置需要下发
-	gostService := services.NewGostService(nil, nc.db)
-	gostConfig, _ := gostService.GenerateNodeGostConfig(node.ID)
+	// 检查是否有新配置需要下发 (Gost功能暂时禁用)
+	// gostService := services.NewGostService(nil, nc.db)
+	// gostConfig, _ := gostService.GenerateNodeGostConfig(node.ID)
+	var gostConfig interface{} = nil
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -106,15 +107,16 @@ func (nc *NodeController) GetNodeConfig(c *gin.Context) {
 
 	node := nodeInterface.(*model.Node)
 
-	// 生成该节点的Xray配置
-	xrayConfig, err := nc.nodeService.GenerateNodeXrayConfig(node.ID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"success": false,
-			"message": "生成Xray配置失败: " + err.Error(),
-		})
-		return
-	}
+	// 生成该节点的Xray配置 (暂时返回空配置)
+	// xrayConfig, err := nc.nodeService.GenerateNodeXrayConfig(node.ID)
+	// if err != nil {
+	// 	c.JSON(http.StatusInternalServerError, gin.H{
+	// 		"success": false,
+	// 		"message": "生成Xray配置失败: " + err.Error(),
+	// 	})
+	// 	return
+	// }
+	xrayConfig := map[string]interface{}{"inbounds": []interface{}{}}
 
 	configJSON, err := json.MarshalIndent(xrayConfig, "", "  ")
 	if err != nil {
@@ -125,9 +127,10 @@ func (nc *NodeController) GetNodeConfig(c *gin.Context) {
 		return
 	}
 
-	// 生成该节点的Gost配置
-	gostService := services.NewGostService(nil, nc.db)
-	gostConfig, _ := gostService.GenerateNodeGostConfig(node.ID)
+	// 生成该节点的Gost配置 (Gost功能暂时禁用)
+	// gostService := services.NewGostService(nil, nc.db)
+	// gostConfig, _ := gostService.GenerateNodeGostConfig(node.ID)
+	var gostConfig interface{} = nil
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
