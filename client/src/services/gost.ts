@@ -95,7 +95,7 @@ export const gostService = {
 
   // 获取转发规则列表
   getForwards: async (tunnelId: number): Promise<GostForward[]> => {
-    const response: any = await api.get(`/api/v1/gost/forwards/by-tunnel/${tunnelId}`);
+    const response: any = await api.get(`/api/v1/gost/tunnels/${tunnelId}/forwards`);
     const data = response?.data || response;
     return Array.isArray(data) ? data : [];
   },

@@ -1,18 +1,13 @@
-/*
- * Design: Gradient Fluid dark theme
- * - Glass cards with backdrop blur
- * - Cyan/purple gradient accents
- * - Table format for node listing
- * - Simplified add node & one-click install script
+/**
+ * Design Philosophy: Gradient Fluid
+ * - Deep purple to blue gradient background
+ * - Frosted glass effect cards
+ * - Smooth animations and micro-interactions
  */
 
-import { useState, useEffect, useCallback } from "react";
-import { toast } from "sonner";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +15,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -27,931 +24,630 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { nodeService, type Node } from "@/services/node";
+import TrafficSummary from "@/components/TrafficSummary";
+import { copyToClipboard } from "@/lib/shareLink";
 import {
-  Server,
-  Plus,
-  Terminal,
+  Activity,
+  Code,
   Copy,
-  Check,
-  RefreshCw,
-  Trash2,
-  Edit,
-  Power,
   Cpu,
+  Download,
   HardDrive,
-  ArrowUp,
-  ArrowDown,
-  Globe,
-  Clock,
-  ChevronDown,
-  ChevronUp,
+  Plus,
+  RefreshCw,
+  Server,
+  Settings,
+  Trash2,
   Wifi,
   WifiOff,
-  Download,
 } from "lucide-react";
-import { nodeService, type Node } from "@/services/node";
-
-// 格式化流量
-function formatBytes(bytes: number): string {
-  if (!bytes || bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB", "TB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
-}
-
-// 格式化时间
-function formatTime(time: string | null): string {
-  if (!time) return "从未";
-  const d = new Date(time);
-  const now = new Date();
-  const diff = Math.floor((now.getTime() - d.getTime()) / 1000);
-  if (diff < 60) return `${diff}秒前`;
-  if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
-  return `${Math.floor(diff / 86400)}天前`;
-}
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 export default function NodeManage() {
   const [nodes, setNodes] = useState<Node[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [installScriptOpen, setInstallScriptOpen] = useState(false);
+  const [installScript, setInstallScript] = useState("");
+  const [loadingScript, setLoadingScript] = useState(false);
+  const [batchConfigOpen, setBatchConfigOpen] = useState(false);
   const [selectedNodes, setSelectedNodes] = useState<number[]>([]);
-
-  // Dialogs
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [editDialogOpen, setEditDialogOpen] = useState(false);
-  const [installDialogOpen, setInstallDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-
-  // Form state
+  const [editingNode, setEditingNode] = useState<Node | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     host: "",
-    port: 10001,
-    type: "both",
+    port: 2053,
     api_token: "",
+    type: "both",
   });
-  const [editingNode, setEditingNode] = useState<Node | null>(null);
-  const [deletingNode, setDeletingNode] = useState<Node | null>(null);
-
-  // Install script state
-  const [installNodeName, setInstallNodeName] = useState("");
-  const [installNodeType, setInstallNodeType] = useState("both");
-  const [installScript, setInstallScript] = useState<any>(null);
-  const [installLoading, setInstallLoading] = useState(false);
-  const [copied, setCopied] = useState(false);
-
-  // Expanded rows
-  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
-
-  // 加载节点列表
-  const loadNodes = useCallback(async () => {
-    try {
-      setLoading(true);
-      const res: any = await nodeService.list(1, 100);
-      const list = res?.data?.nodes || res?.nodes || [];
-      setNodes(Array.isArray(list) ? list : []);
-    } catch {
-      // silent
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   useEffect(() => {
     loadNodes();
-    const interval = setInterval(loadNodes, 30000);
-    return () => clearInterval(interval);
-  }, [loadNodes]);
+  }, []);
 
-  // 统计
-  const totalNodes = nodes.length;
-  const onlineNodes = nodes.filter((n) => n.status === "online").length;
-  const totalUp = nodes.reduce((s, n) => s + (n.traffic_up || 0), 0);
-  const totalDown = nodes.reduce((s, n) => s + (n.traffic_down || 0), 0);
+  useEffect(() => {
+    if (installScriptOpen && !installScript) {
+      loadInstallScript();
+    }
+  }, [installScriptOpen]);
 
-  // 添加节点
-  const handleAddNode = async () => {
-    if (!formData.name.trim()) {
-      toast.error("请输入节点名称");
-      return;
-    }
-    if (!formData.host.trim()) {
-      toast.error("请输入节点地址");
-      return;
-    }
+  const loadInstallScript = async () => {
     try {
-      await nodeService.create(formData);
-      toast.success("节点添加成功");
-      setAddDialogOpen(false);
-      setFormData({ name: "", host: "", port: 10001, type: "both", api_token: "" });
-      loadNodes();
-    } catch {
-      toast.error("添加失败");
-    }
-  };
-
-  // 编辑节点
-  const handleEditNode = async () => {
-    if (!editingNode) return;
-    try {
-      await nodeService.update(editingNode.id, {
-        name: editingNode.name,
-        host: editingNode.host,
-        port: editingNode.port,
-        type: editingNode.type,
-      });
-      toast.success("节点更新成功");
-      setEditDialogOpen(false);
-      setEditingNode(null);
-      loadNodes();
-    } catch {
-      toast.error("更新失败");
-    }
-  };
-
-  // 删除节点
-  const handleDeleteNode = async () => {
-    if (!deletingNode) return;
-    try {
-      await nodeService.delete(deletingNode.id);
-      toast.success("节点已删除");
-      setDeleteDialogOpen(false);
-      setDeletingNode(null);
-      loadNodes();
-    } catch {
-      toast.error("删除失败");
-    }
-  };
-
-  // 切换节点状态
-  const handleToggle = async (node: Node) => {
-    try {
-      await nodeService.toggle(node.id);
-      toast.success(node.status === "online" ? "节点已停用" : "节点已启用");
-      loadNodes();
-    } catch {
-      toast.error("操作失败");
-    }
-  };
-
-  // 同步配置
-  const handleSync = async (node: Node) => {
-    try {
-      await nodeService.sync(node.id);
-      toast.success(`${node.name} 配置已同步`);
-    } catch {
-      toast.error("同步失败");
-    }
-  };
-
-  // 生成安装脚本
-  const handleGenerateScript = async () => {
-    setInstallLoading(true);
-    try {
-      const result = await nodeService.generateInstallScript(installNodeName, installNodeType);
-      setInstallScript(result);
-    } catch {
-      toast.error("生成安装脚本失败");
+      setLoadingScript(true);
+      const response: any = await nodeService.generateInstallScript({ node_type: "both" });
+      const script = response?.data?.script || response?.script || "";
+      setInstallScript(script);
+    } catch (error) {
+      console.error("加载安装脚本失败:", error);
+      toast.error("加载安装脚本失败");
     } finally {
-      setInstallLoading(false);
+      setLoadingScript(false);
     }
   };
 
-  // 生成 Token
-  const handleGenerateToken = async () => {
+  const loadNodes = async () => {
     try {
-      const token = await nodeService.generateToken();
-      if (token) {
-        setFormData((prev) => ({ ...prev, api_token: token }));
-        toast.success("Token 已生成");
+      setLoading(true);
+      const response: any = await nodeService.list();
+      // response 被拦截器解包后是: { success, data: { nodes: [...], total, page }, message }
+      const nodeList = response?.data?.nodes || response?.nodes || [];
+      setNodes(Array.isArray(nodeList) ? nodeList : []);
+    } catch (error) {
+      console.error("加载节点列表失败:", error);
+      toast.error("加载节点列表失败");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreate = () => {
+    setEditingNode(null);
+    setFormData({
+      name: "",
+      host: "",
+      port: 2053,
+      api_token: "",
+      type: "both",
+    });
+    setDialogOpen(true);
+  };
+
+  const handleEdit = (node: Node) => {
+    setEditingNode(node);
+    setFormData({
+      name: node.name,
+      host: node.host,
+      port: node.port,
+      api_token: node.api_token,
+      type: node.type,
+    });
+    setDialogOpen(true);
+  };
+
+  const handleSubmit = async () => {
+    try {
+      console.log('提交表单数据:', formData);
+      if (editingNode) {
+        const response = await nodeService.update(editingNode.id, formData);
+        console.log('更新响应:', response);
+        toast.success("节点更新成功");
+      } else {
+        const response = await nodeService.create(formData);
+        console.log('创建响应:', response);
+        toast.success("节点创建成功");
       }
-    } catch {
-      toast.error("生成 Token 失败");
+      setDialogOpen(false);
+      loadNodes();
+    } catch (error: any) {
+      console.error("保存节点失败:", error);
+      console.error("错误详情:", error.response?.data || error.message);
+      toast.error(error.response?.data?.message || "保存节点失败");
     }
   };
 
-  // 复制到剪贴板
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(true);
-      toast.success("已复制到剪贴板");
-      setTimeout(() => setCopied(false), 2000);
-    }).catch(() => {
-      // fallback
-      const textarea = document.createElement("textarea");
-      textarea.value = text;
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textarea);
-      setCopied(true);
-      toast.success("已复制到剪贴板");
-      setTimeout(() => setCopied(false), 2000);
-    });
-  };
+  const handleDelete = async (id: number) => {
+    if (!confirm("确定要删除这个节点吗?")) return;
 
-  // 批量同步
-  const handleBatchSync = async () => {
-    if (selectedNodes.length === 0) {
-      toast.error("请先选择节点");
-      return;
-    }
     try {
-      await nodeService.batchSync(selectedNodes);
-      toast.success(`已同步 ${selectedNodes.length} 个节点`);
-      setSelectedNodes([]);
-    } catch {
-      toast.error("批量同步失败");
+      await nodeService.delete(id);
+      toast.success("节点已删除");
+      loadNodes();
+    } catch (error) {
+      console.error("删除节点失败:", error);
+      toast.error("删除节点失败");
     }
   };
 
-  // 展开/收起行
-  const toggleExpand = (id: number) => {
-    setExpandedRows((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const handleToggle = async (id: number) => {
+    try {
+      await nodeService.toggle(id);
+      toast.success("节点状态已更新");
+      loadNodes();
+    } catch (error) {
+      console.error("切换节点状态失败:", error);
+      toast.error("切换节点状态失败");
+    }
   };
 
-  // 节点类型标签
-  const TypeBadge = ({ type }: { type: string }) => {
-    const colors: Record<string, string> = {
-      xray: "bg-blue-500/20 text-blue-400 border-blue-400/30",
-      gost: "bg-green-500/20 text-green-400 border-green-400/30",
-      both: "bg-purple-500/20 text-purple-400 border-purple-400/30",
-    };
-    const labels: Record<string, string> = {
-      xray: "Xray",
-      gost: "Gost",
-      both: "全部",
-    };
-    return (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${colors[type] || colors.both}`}>
-        {labels[type] || type}
-      </span>
-    );
+  const handleSync = async (id: number) => {
+    try {
+      await nodeService.sync(id);
+      toast.success("节点配置同步成功");
+    } catch (error) {
+      console.error("同步节点配置失败:", error);
+      toast.error("同步节点配置失败");
+    }
   };
 
-  // 状态标签
-  const StatusBadge = ({ status }: { status: string }) => {
-    if (status === "online") {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/15 text-emerald-400 border border-emerald-400/20">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          在线
-        </span>
-      );
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "online":
+        return "text-green-400 bg-green-500/20";
+      case "offline":
+        return "text-gray-400 bg-gray-500/20";
+      case "error":
+        return "text-red-400 bg-red-500/20";
+      default:
+        return "text-gray-400 bg-gray-500/20";
     }
-    if (status === "disabled") {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-500/15 text-gray-400 border border-gray-400/20">
-          <span className="w-1.5 h-1.5 rounded-full bg-gray-400" />
-          已停用
-        </span>
-      );
+  };
+
+  const getTypeColor = (type: string) => {
+    switch (type) {
+      case "xray":
+        return "from-blue-500 to-cyan-500";
+      case "gost":
+        return "from-purple-500 to-pink-500";
+      case "both":
+        return "from-orange-500 to-red-500";
+      default:
+        return "from-gray-500 to-gray-600";
     }
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-500/15 text-red-400 border border-red-400/20">
-        <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
-        离线
-      </span>
-    );
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB", "TB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + " " + sizes[i];
   };
 
   return (
     <DashboardLayout>
       <div className="space-y-6">
-        {/* 页头 */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        {/* 页面标题 */}
+        <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
-              节点管理
-            </h1>
-            <p className="text-white/50 text-sm mt-1">管理分布式代理节点，支持一键安装和自动配置下发</p>
+            <h1 className="text-3xl font-bold gradient-text">节点管理</h1>
+            <p className="text-white/60 mt-1">管理分布式代理节点</p>
           </div>
           <div className="flex gap-2">
-            {selectedNodes.length > 0 && (
-              <Button
-                onClick={handleBatchSync}
-                variant="outline"
-                size="sm"
-                className="border-white/20 hover:bg-cyan-500/20 text-white/80"
-              >
-                <RefreshCw className="w-4 h-4 mr-1.5" />
-                批量同步 ({selectedNodes.length})
-              </Button>
-            )}
             <Button
-              onClick={() => {
-                setInstallScript(null);
-                setInstallNodeName("");
-                setInstallNodeType("both");
-                setInstallDialogOpen(true);
-              }}
+              onClick={() => setInstallScriptOpen(true)}
               variant="outline"
-              size="sm"
-              className="border-cyan-400/30 text-cyan-400 hover:bg-cyan-500/20"
+              className="border-white/20 hover:bg-cyan-500/20 hover:border-cyan-400/50"
             >
-              <Terminal className="w-4 h-4 mr-1.5" />
-              一键安装
+              <Code className="w-4 h-4 mr-2" />
+              安装脚本
             </Button>
             <Button
-              onClick={() => {
-                setFormData({ name: "", host: "", port: 10001, type: "both", api_token: "" });
-                setAddDialogOpen(true);
-              }}
-              size="sm"
-              className="bg-gradient-to-r from-cyan-500 to-purple-500 text-white"
+              onClick={() => setBatchConfigOpen(true)}
+              variant="outline"
+              className="border-white/20 hover:bg-purple-500/20 hover:border-purple-400/50"
+              disabled={selectedNodes.length === 0}
             >
-              <Plus className="w-4 h-4 mr-1.5" />
+              <Settings className="w-4 h-4 mr-2" />
+              批量配置 ({selectedNodes.length})
+            </Button>
+            <Button
+              onClick={handleCreate}
+              className="bg-gradient-to-r from-cyan-500 to-purple-500 hover:from-cyan-600 hover:to-purple-600"
+            >
+              <Plus className="w-4 h-4 mr-2" />
               添加节点
             </Button>
           </div>
         </div>
 
-        {/* 统计卡片 */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {[
-            { label: "总节点数", value: totalNodes, icon: Server, color: "cyan" },
-            { label: "在线节点", value: onlineNodes, icon: Wifi, color: "emerald" },
-            { label: "总上传", value: formatBytes(totalUp), icon: ArrowUp, color: "blue" },
-            { label: "总下载", value: formatBytes(totalDown), icon: ArrowDown, color: "purple" },
-          ].map((stat) => (
-            <div
-              key={stat.label}
-              className="bg-white/[0.03] backdrop-blur border border-white/10 rounded-xl p-4"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-white/50 text-xs">{stat.label}</p>
-                  <p className="text-xl font-bold text-white mt-1">{stat.value}</p>
-                </div>
-                <div className={`w-9 h-9 rounded-lg bg-${stat.color}-500/15 flex items-center justify-center`}>
-                  <stat.icon className={`w-4.5 h-4.5 text-${stat.color}-400`} />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        {/* 流量统计汇总 */}
+        {!loading && nodes.length > 0 && <TrafficSummary nodes={nodes} />}
 
-        {/* 节点表格 */}
-        <div className="bg-white/[0.03] backdrop-blur border border-white/10 rounded-xl overflow-hidden">
-          {/* 表头 */}
-          <div className="grid grid-cols-[auto_2fr_1fr_1fr_1fr_1fr_1fr_auto] gap-2 px-4 py-3 border-b border-white/10 text-xs text-white/40 font-medium">
-            <div className="w-8 flex items-center">
-              <input
-                type="checkbox"
-                className="rounded border-white/20 bg-white/5"
-                checked={selectedNodes.length === nodes.length && nodes.length > 0}
-                onChange={(e) => {
-                  if (e.target.checked) setSelectedNodes(nodes.map((n) => n.id));
-                  else setSelectedNodes([]);
-                }}
-              />
-            </div>
-            <div>节点名称</div>
-            <div>地址</div>
-            <div>类型</div>
-            <div>状态</div>
-            <div>资源</div>
-            <div>心跳</div>
-            <div className="text-right">操作</div>
+        {/* 节点列表 */}
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <RefreshCw className="w-8 h-8 animate-spin text-cyan-400" />
           </div>
-
-          {/* 表内容 */}
-          {loading ? (
-            <div className="flex items-center justify-center py-16 text-white/40">
-              <RefreshCw className="w-5 h-5 animate-spin mr-2" />
-              加载中...
-            </div>
-          ) : nodes.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-white/40">
-              <Server className="w-10 h-10 mb-3 opacity-30" />
-              <p>暂无节点</p>
-              <p className="text-xs mt-1">点击"一键安装"或"添加节点"开始</p>
-            </div>
-          ) : (
-            nodes.map((node) => (
-              <div key={node.id}>
-                {/* 主行 */}
-                <div
-                  className={`grid grid-cols-[auto_2fr_1fr_1fr_1fr_1fr_1fr_auto] gap-2 px-4 py-3 border-b border-white/5 hover:bg-white/[0.02] transition-colors items-center text-sm ${
-                    selectedNodes.includes(node.id) ? "bg-cyan-500/5" : ""
-                  }`}
-                >
-                  <div className="w-8">
-                    <input
-                      type="checkbox"
-                      className="rounded border-white/20 bg-white/5"
-                      checked={selectedNodes.includes(node.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) setSelectedNodes([...selectedNodes, node.id]);
-                        else setSelectedNodes(selectedNodes.filter((id) => id !== node.id));
-                      }}
-                    />
-                  </div>
-                  <div className="flex items-center gap-2 min-w-0">
-                    <button
-                      onClick={() => toggleExpand(node.id)}
-                      className="text-white/30 hover:text-white/60 transition-colors shrink-0"
-                    >
-                      {expandedRows.has(node.id) ? (
-                        <ChevronUp className="w-4 h-4" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4" />
-                      )}
-                    </button>
-                    <span className="text-white font-medium truncate">{node.name}</span>
-                  </div>
-                  <div className="text-white/60 text-xs font-mono truncate">
-                    {node.host}:{node.port}
-                  </div>
-                  <div>
-                    <TypeBadge type={node.type} />
-                  </div>
-                  <div>
-                    <StatusBadge status={node.status} />
-                  </div>
-                  <div className="text-xs text-white/50">
-                    <div className="flex items-center gap-1">
-                      <Cpu className="w-3 h-3" />
-                      {(node.cpu_usage || 0).toFixed(1)}%
+        ) : nodes.length === 0 ? (
+          <Card className="glass-card border-white/20 p-12 text-center">
+            <Server className="w-16 h-16 mx-auto mb-4 text-white/40" />
+            <p className="text-white/60 text-lg">暂无节点</p>
+            <p className="text-white/40 text-sm mt-2">点击右上角"添加节点"按钮开始</p>
+          </Card>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2">
+            {nodes.map((node) => (
+              <Card
+                key={node.id}
+                className={`glass-card border-white/20 p-6 hover:border-cyan-400/30 transition-all duration-300 ${
+                  selectedNodes.includes(node.id) ? 'ring-2 ring-cyan-400' : ''
+                }`}
+                onClick={() => {
+                  if (selectedNodes.includes(node.id)) {
+                    setSelectedNodes(selectedNodes.filter(id => id !== node.id));
+                  } else {
+                    setSelectedNodes([...selectedNodes, node.id]);
+                  }
+                }}
+              >
+                {/* 节点头部 */}
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <h3 className="text-lg font-semibold text-white">
+                        {node.name}
+                      </h3>
+                      <div
+                        className={`px-2 py-0.5 rounded text-xs ${getStatusColor(
+                          node.status
+                        )}`}
+                      >
+                        {node.status === "online" && <Wifi className="w-3 h-3 inline mr-1" />}
+                        {node.status === "offline" && <WifiOff className="w-3 h-3 inline mr-1" />}
+                        {node.status}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1 mt-0.5">
-                      <HardDrive className="w-3 h-3" />
-                      {(node.memory_usage || 0).toFixed(1)}%
+                    <div
+                      className={`inline-block px-3 py-1 rounded-full bg-gradient-to-r ${getTypeColor(
+                        node.type
+                      )} text-white text-xs font-medium`}
+                    >
+                      {node.type.toUpperCase()}
                     </div>
-                  </div>
-                  <div className="text-xs text-white/40 flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    {formatTime(node.last_heartbeat)}
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0 text-white/40 hover:text-cyan-400 hover:bg-cyan-500/10"
-                      onClick={() => handleSync(node)}
-                      title="同步配置"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0 text-white/40 hover:text-blue-400 hover:bg-blue-500/10"
-                      onClick={() => {
-                        setEditingNode({ ...node });
-                        setEditDialogOpen(true);
-                      }}
-                      title="编辑"
-                    >
-                      <Edit className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className={`h-7 w-7 p-0 ${
-                        node.status === "online"
-                          ? "text-white/40 hover:text-amber-400 hover:bg-amber-500/10"
-                          : "text-white/40 hover:text-emerald-400 hover:bg-emerald-500/10"
-                      }`}
-                      onClick={() => handleToggle(node)}
-                      title={node.status === "online" ? "停用" : "启用"}
-                    >
-                      <Power className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0 text-white/40 hover:text-red-400 hover:bg-red-500/10"
-                      onClick={() => {
-                        setDeletingNode(node);
-                        setDeleteDialogOpen(true);
-                      }}
-                      title="删除"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
                   </div>
                 </div>
 
-                {/* 展开详情 */}
-                {expandedRows.has(node.id) && (
-                  <div className="px-4 py-3 border-b border-white/5 bg-white/[0.01]">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-                      <div>
-                        <span className="text-white/40">上传流量</span>
-                        <p className="text-white font-medium mt-0.5 flex items-center gap-1">
-                          <ArrowUp className="w-3 h-3 text-cyan-400" />
-                          {formatBytes(node.traffic_up)}
-                        </p>
-                      </div>
-                      <div>
-                        <span className="text-white/40">下载流量</span>
-                        <p className="text-white font-medium mt-0.5 flex items-center gap-1">
-                          <ArrowDown className="w-3 h-3 text-purple-400" />
-                          {formatBytes(node.traffic_down)}
-                        </p>
-                      </div>
-                      <div>
-                        <span className="text-white/40">API Token</span>
-                        <p className="text-white/60 font-mono mt-0.5 truncate" title={node.api_token}>
-                          {node.api_token ? node.api_token.slice(0, 12) + "..." : "未设置"}
-                        </p>
-                      </div>
-                      <div>
-                        <span className="text-white/40">创建时间</span>
-                        <p className="text-white/60 mt-0.5">
-                          {node.created_at ? new Date(node.created_at).toLocaleDateString() : "-"}
-                        </p>
-                      </div>
+                {/* 节点信息 */}
+                <div className="space-y-2 mb-4">
+                  <p className="text-white/60 text-sm">
+                    <span className="text-white/40">地址:</span> {node.host}:{node.port}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="flex items-center gap-2 text-white/60">
+                      <Cpu className="w-4 h-4 text-cyan-400" />
+                      <span>CPU: {node.cpu_usage.toFixed(1)}%</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-white/60">
+                      <HardDrive className="w-4 h-4 text-purple-400" />
+                      <span>内存: {node.memory_usage.toFixed(1)}%</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-white/60">
+                      <Activity className="w-4 h-4 text-green-400" />
+                      <span>↑ {formatBytes(node.traffic_up)}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-white/60">
+                      <Activity className="w-4 h-4 text-orange-400" />
+                      <span>↓ {formatBytes(node.traffic_down)}</span>
                     </div>
                   </div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
+                </div>
+
+                {/* 操作按钮 */}
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleEdit(node)}
+                    className="flex-1 border-white/20 hover:bg-cyan-500/20 hover:border-cyan-400/50"
+                  >
+                    编辑
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleSync(node.id)}
+                    className="flex-1 border-white/20 hover:bg-purple-500/20 hover:border-purple-400/50"
+                  >
+                    <RefreshCw className="w-4 h-4 mr-1" />
+                    同步
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleToggle(node.id)}
+                    className="border-white/20 hover:bg-orange-500/20 hover:border-orange-400/50"
+                  >
+                    {node.status === "online" ? "停用" : "启用"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleDelete(node.id)}
+                    className="border-white/20 hover:bg-red-500/20 hover:border-red-400/50"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* ===== 添加节点对话框 ===== */}
-      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-        <DialogContent className="bg-[#1a1a2e] border-white/10 max-w-lg">
+      {/* 添加/编辑节点对话框 */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="glass-card border-white/20">
           <DialogHeader>
-            <DialogTitle className="text-white flex items-center gap-2">
-              <Plus className="w-5 h-5 text-cyan-400" />
-              添加节点
+            <DialogTitle className="gradient-text">
+              {editingNode ? "编辑节点" : "添加节点"}
             </DialogTitle>
-            <DialogDescription className="text-white/50">
-              手动添加节点信息。推荐使用"一键安装"自动注册。
+            <DialogDescription className="text-white/60">
+              配置远程节点信息
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label className="text-white/80">节点名称 <span className="text-red-400">*</span></Label>
+              <Label className="text-white/90">节点名称</Label>
               <Input
                 value={formData.name}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="如：HK-01 香港节点"
-                className="bg-white/5 border-white/15 text-white placeholder:text-white/30"
+                onChange={(e) =>
+                  setFormData({ ...formData, name: e.target.value })
+                }
+                className="bg-white/5 border-white/20 text-white"
+                placeholder="例如: 香港节点-01"
               />
             </div>
-
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-white/80">节点地址 <span className="text-red-400">*</span></Label>
+                <Label className="text-white/90">主机地址</Label>
                 <Input
                   value={formData.host}
-                  onChange={(e) => setFormData({ ...formData, host: e.target.value })}
-                  placeholder="IP 或域名"
-                  className="bg-white/5 border-white/15 text-white placeholder:text-white/30"
+                  onChange={(e) =>
+                    setFormData({ ...formData, host: e.target.value })
+                  }
+                  className="bg-white/5 border-white/20 text-white"
+                  placeholder="192.168.1.100"
                 />
               </div>
               <div className="space-y-2">
-                <Label className="text-white/80">端口</Label>
+                <Label className="text-white/90">端口</Label>
                 <Input
                   type="number"
                   value={formData.port}
-                  onChange={(e) => setFormData({ ...formData, port: parseInt(e.target.value) || 10001 })}
-                  className="bg-white/5 border-white/15 text-white"
+                  onChange={(e) =>
+                    setFormData({ ...formData, port: parseInt(e.target.value) })
+                  }
+                  className="bg-white/5 border-white/20 text-white"
                 />
               </div>
             </div>
-
             <div className="space-y-2">
-              <Label className="text-white/80">节点类型</Label>
-              <Select value={formData.type} onValueChange={(v) => setFormData({ ...formData, type: v })}>
-                <SelectTrigger className="bg-white/5 border-white/15 text-white">
+              <Label className="text-white/90">API Token</Label>
+              <Input
+                value={formData.api_token}
+                onChange={(e) =>
+                  setFormData({ ...formData, api_token: e.target.value })
+                }
+                className="bg-white/5 border-white/20 text-white"
+                placeholder="节点API认证令牌"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-white/90">节点类型</Label>
+              <Select
+                value={formData.type}
+                onValueChange={(value) =>
+                  setFormData({ ...formData, type: value })
+                }
+              >
+                <SelectTrigger className="bg-white/5 border-white/20 text-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="both">全部 (Xray + Gost)</SelectItem>
-                  <SelectItem value="xray">仅 Xray</SelectItem>
-                  <SelectItem value="gost">仅 Gost</SelectItem>
+                  <SelectItem value="xray">Xray</SelectItem>
+                  <SelectItem value="gost">Gost</SelectItem>
+                  <SelectItem value="both">Both (Xray + Gost)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setDialogOpen(false)}
+              className="border-white/20"
+            >
+              取消
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              className="bg-gradient-to-r from-cyan-500 to-purple-500"
+            >
+              {editingNode ? "更新" : "创建"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
+      {/* 安装脚本对话框 */}
+      <Dialog open={installScriptOpen} onOpenChange={setInstallScriptOpen}>
+        <DialogContent className="glass-card border-white/20 max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="gradient-text flex items-center gap-2">
+              <Code className="w-5 h-5" />
+              节点安装脚本
+            </DialogTitle>
+            <DialogDescription className="text-white/60">
+              在远程服务器上运行以下命令自动安装节点
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label className="text-white/80">API Token</Label>
-              <div className="flex gap-2">
-                <Input
-                  value={formData.api_token}
-                  onChange={(e) => setFormData({ ...formData, api_token: e.target.value })}
-                  placeholder="留空将自动生成"
-                  className="bg-white/5 border-white/15 text-white placeholder:text-white/30 font-mono text-xs"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleGenerateToken}
-                  className="border-white/15 text-white/60 hover:text-cyan-400 hover:bg-cyan-500/10 shrink-0"
-                >
-                  <RefreshCw className="w-3.5 h-3.5" />
-                </Button>
+              <div className="flex items-center justify-between mb-2">
+                <Label className="text-white/90">安装命令（点击下方命令框复制）</Label>
               </div>
-              <p className="text-xs text-white/30">用于节点与面板通信的认证令牌</p>
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => setAddDialogOpen(false)} className="border-white/15 text-white/60">
-              取消
-            </Button>
-            <Button onClick={handleAddNode} className="bg-gradient-to-r from-cyan-500 to-purple-500 text-white">
-              添加节点
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ===== 编辑节点对话框 ===== */}
-      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="bg-[#1a1a2e] border-white/10 max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="text-white flex items-center gap-2">
-              <Edit className="w-5 h-5 text-blue-400" />
-              编辑节点
-            </DialogTitle>
-          </DialogHeader>
-          {editingNode && (
-            <div className="space-y-4 py-2">
-              <div className="space-y-2">
-                <Label className="text-white/80">节点名称</Label>
-                <Input
-                  value={editingNode.name}
-                  onChange={(e) => setEditingNode({ ...editingNode, name: e.target.value })}
-                  className="bg-white/5 border-white/15 text-white"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label className="text-white/80">节点地址</Label>
-                  <Input
-                    value={editingNode.host}
-                    onChange={(e) => setEditingNode({ ...editingNode, host: e.target.value })}
-                    className="bg-white/5 border-white/15 text-white"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-white/80">端口</Label>
-                  <Input
-                    type="number"
-                    value={editingNode.port}
-                    onChange={(e) => setEditingNode({ ...editingNode, port: parseInt(e.target.value) || 10001 })}
-                    className="bg-white/5 border-white/15 text-white"
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-white/80">节点类型</Label>
-                <Select value={editingNode.type} onValueChange={(v) => setEditingNode({ ...editingNode, type: v })}>
-                  <SelectTrigger className="bg-white/5 border-white/15 text-white">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="both">全部 (Xray + Gost)</SelectItem>
-                    <SelectItem value="xray">仅 Xray</SelectItem>
-                    <SelectItem value="gost">仅 Gost</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          )}
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => setEditDialogOpen(false)} className="border-white/15 text-white/60">
-              取消
-            </Button>
-            <Button onClick={handleEditNode} className="bg-gradient-to-r from-cyan-500 to-purple-500 text-white">
-              保存修改
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ===== 删除确认对话框 ===== */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent className="bg-[#1a1a2e] border-white/10 max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-white">确认删除</DialogTitle>
-            <DialogDescription className="text-white/50">
-              确定要删除节点 <span className="text-red-400 font-medium">{deletingNode?.name}</span> 吗？此操作不可撤销。
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex justify-end gap-2 pt-2">
-            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} className="border-white/15 text-white/60">
-              取消
-            </Button>
-            <Button onClick={handleDeleteNode} className="bg-red-500/80 hover:bg-red-500 text-white">
-              确认删除
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ===== 一键安装脚本对话框 ===== */}
-      <Dialog open={installDialogOpen} onOpenChange={setInstallDialogOpen}>
-        <DialogContent className="bg-[#1a1a2e] border-white/10 max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-white flex items-center gap-2">
-              <Terminal className="w-5 h-5 text-cyan-400" />
-              一键安装节点
-            </DialogTitle>
-            <DialogDescription className="text-white/50">
-              生成安装命令，在 VPS 上运行即可自动安装并注册到面板
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-5 py-2">
-            {/* 步骤1: 选择配置 */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-cyan-500/20 text-cyan-400 text-xs font-bold flex items-center justify-center">1</span>
-                <span className="text-white font-medium text-sm">选择节点配置</span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pl-8">
-                <div className="space-y-1.5">
-                  <Label className="text-white/60 text-xs">节点名称（可选）</Label>
-                  <Input
-                    value={installNodeName}
-                    onChange={(e) => setInstallNodeName(e.target.value)}
-                    placeholder="留空使用主机名"
-                    className="bg-white/5 border-white/15 text-white placeholder:text-white/25 h-9 text-sm"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-white/60 text-xs">节点类型</Label>
-                  <Select value={installNodeType} onValueChange={setInstallNodeType}>
-                    <SelectTrigger className="bg-white/5 border-white/15 text-white h-9 text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="both">全部 (Xray + Gost)</SelectItem>
-                      <SelectItem value="xray">仅 Xray</SelectItem>
-                      <SelectItem value="gost">仅 Gost (隧道转发)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="pl-8">
-                <Button
-                  onClick={handleGenerateScript}
-                  disabled={installLoading}
-                  className="bg-gradient-to-r from-cyan-500 to-purple-500 text-white h-9 text-sm"
-                >
-                  {installLoading ? (
-                    <RefreshCw className="w-4 h-4 mr-1.5 animate-spin" />
-                  ) : (
-                    <Terminal className="w-4 h-4 mr-1.5" />
-                  )}
-                  生成安装命令
-                </Button>
-              </div>
-            </div>
-
-            {/* 步骤2: 安装命令 */}
-            {installScript && (
-              <>
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-cyan-500/20 text-cyan-400 text-xs font-bold flex items-center justify-center">2</span>
-                    <span className="text-white font-medium text-sm">复制安装命令</span>
-                  </div>
-
-                  <div className="pl-8 space-y-3">
-                    {/* 一行命令 */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-white/60 text-xs">一行安装命令（推荐）</Label>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 px-2 text-xs text-cyan-400 hover:bg-cyan-500/10"
-                          onClick={() => copyToClipboard(installScript.one_liner)}
-                        >
-                          {copied ? <Check className="w-3 h-3 mr-1" /> : <Copy className="w-3 h-3 mr-1" />}
-                          {copied ? "已复制" : "复制"}
-                        </Button>
-                      </div>
-                      <div
-                        className="bg-black/40 border border-cyan-400/20 rounded-lg p-3 cursor-pointer hover:border-cyan-400/40 transition-colors group"
-                        onClick={() => copyToClipboard(installScript.one_liner)}
-                      >
-                        <code className="text-cyan-300 text-xs font-mono break-all leading-relaxed">
-                          {installScript.one_liner}
-                        </code>
-                      </div>
-                    </div>
-
-                    {/* Token 信息 */}
-                    <div className="bg-white/[0.03] border border-white/10 rounded-lg p-3 space-y-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-white/40">API Token</span>
-                        <button
-                          className="text-white/60 font-mono hover:text-cyan-400 transition-colors flex items-center gap-1"
-                          onClick={() => copyToClipboard(installScript.api_token)}
-                        >
-                          {installScript.api_token}
-                          <Copy className="w-3 h-3" />
-                        </button>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-white/40">面板地址</span>
-                        <span className="text-white/60 font-mono">{installScript.panel_url}</span>
-                      </div>
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-white/40">节点类型</span>
-                        <TypeBadge type={installScript.node_type} />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 步骤3: 在 VPS 上运行 */}
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-cyan-500/20 text-cyan-400 text-xs font-bold flex items-center justify-center">3</span>
-                    <span className="text-white font-medium text-sm">在 VPS 上运行</span>
-                  </div>
-
-                  <div className="pl-8">
-                    <div className="bg-emerald-500/5 border border-emerald-400/20 rounded-lg p-3 space-y-2 text-xs text-white/60">
-                      <p className="flex items-center gap-1.5">
-                        <span className="text-emerald-400">1.</span>
-                        以 <code className="bg-black/30 px-1.5 py-0.5 rounded text-white/80">root</code> 用户 SSH 登录到你的 VPS
-                      </p>
-                      <p className="flex items-center gap-1.5">
-                        <span className="text-emerald-400">2.</span>
-                        粘贴上面的安装命令并回车执行
-                      </p>
-                      <p className="flex items-center gap-1.5">
-                        <span className="text-emerald-400">3.</span>
-                        等待安装完成，节点将自动注册到面板
-                      </p>
-                      <p className="flex items-center gap-1.5">
-                        <span className="text-emerald-400">4.</span>
-                        安装后节点每 30 秒自动同步配置，无需手动操作
-                      </p>
-                    </div>
-
-                    {/* 国内镜像加速说明 */}
-                    <div className="bg-amber-500/5 border border-amber-400/20 rounded-lg p-3 space-y-2 text-xs mt-3">
-                      <div className="flex items-center gap-1.5 text-amber-400 font-medium">
-                        <Globe className="w-3.5 h-3.5" />
-                        国内 VPS 自动加速
-                      </div>
-                      <p className="text-white/50">
-                        脚本会自动检测网络环境，国内 VPS 将通过 GitHub 镜像加速下载 Xray/Gost，无需手动配置代理。
-                        支持多个镜像源自动切换，确保安装成功。
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 支持信息 */}
-                <div className="pl-8">
-                  <div className="bg-white/[0.02] border border-white/5 rounded-lg p-3 text-xs text-white/40 space-y-1">
-                    <p>支持系统: Ubuntu, Debian, CentOS, RHEL</p>
-                    <p>支持架构: x86_64 (amd64), aarch64 (arm64)</p>
-                    <p>网络环境: 自动检测国内/国外，国内自动使用镜像加速</p>
-                    <p>安装目录: /opt/uniproxy-node/</p>
-                    <p>Agent 服务: systemctl status uniproxy-agent</p>
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2">
-            {installScript && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const blob = new Blob([installScript.script], { type: "text/plain" });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = "install-node.sh";
-                  a.click();
-                  URL.revokeObjectURL(url);
+              <div 
+                className="bg-black/40 border border-white/10 rounded-lg p-4 font-mono text-sm text-cyan-400 overflow-x-auto cursor-pointer hover:border-cyan-500/50 transition-colors relative group"
+                onClick={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  
+                  if (!installScript) {
+                    toast.error('安装脚本未加载');
+                    return;
+                  }
+                  
+                  const success = await copyToClipboard(installScript);
+                  if (success) {
+                    toast.success('已复制到剪贴板');
+                  } else {
+                    toast.error('复制失败');
+                  }
                 }}
-                className="border-white/15 text-white/60 hover:text-white"
+                title="点击复制"
               >
-                <Download className="w-4 h-4 mr-1.5" />
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Copy className="w-4 h-4 text-cyan-400" />
+                </div>
+                {loadingScript ? (
+                  <div className="flex items-center justify-center py-4">
+                    <RefreshCw className="w-5 h-5 animate-spin text-cyan-400 mr-2" />
+                    <span>加载中...</span>
+                  </div>
+                ) : (
+                  <pre className="whitespace-pre-wrap break-all">{installScript || "加载失败"}</pre>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-white/90">使用说明</Label>
+              <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-2 text-sm text-white/70">
+                <p>1. 点击上方命令框复制安装脚本</p>
+                <p>2. 在远程服务器上以root用户运行该命令</p>
+                <p>3. 脚本会自动安装Xray/Gost并注册到面板</p>
+                <p>4. <strong className="text-cyan-400">国内VPS自动使用镜像加速</strong>，无需手动配置</p>
+                <p>5. 支持的系统: Ubuntu, Debian, CentOS, RHEL | 架构: x86_64, aarch64</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-white/90">环境变量</Label>
+              <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-2 text-sm font-mono text-white/70">
+                <div className="flex justify-between">
+                  <span className="text-cyan-400">PANEL_URL</span>
+                  <span>面板地址 (必需)</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-cyan-400">API_TOKEN</span>
+                  <span>API认证令牌 (必需)</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-cyan-400">NODE_NAME</span>
+                  <span>节点名称 (可选,默认为主机名)</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-cyan-400">NODE_TYPE</span>
+                  <span>节点类型 (可选: xray, gost, both,默认both)</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => {
+                  window.open(`${window.location.origin}/node-install.sh`, '_blank');
+                }}
+                variant="outline"
+                className="flex-1 border-white/20 hover:bg-purple-500/20"
+              >
+                <Download className="w-4 h-4 mr-2" />
                 下载脚本
               </Button>
-            )}
+              <Button
+                onClick={() => setInstallScriptOpen(false)}
+                className="flex-1 bg-gradient-to-r from-cyan-500 to-purple-500"
+              >
+                关闭
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* 批量配置对话框 */}
+      <Dialog open={batchConfigOpen} onOpenChange={setBatchConfigOpen}>
+        <DialogContent className="glass-card border-white/20 max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="gradient-text flex items-center gap-2">
+              <Settings className="w-5 h-5" />
+              批量配置节点
+            </DialogTitle>
+            <DialogDescription className="text-white/60">
+              为选中的 {selectedNodes.length} 个节点统一下发配置
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="bg-white/5 border border-white/10 rounded-lg p-4">
+              <h4 className="text-white font-medium mb-2">选中的节点:</h4>
+              <div className="flex flex-wrap gap-2">
+                {selectedNodes.map(id => {
+                  const node = nodes.find(n => n.id === id);
+                  return node ? (
+                    <div key={id} className="bg-cyan-500/20 border border-cyan-400/30 rounded px-3 py-1 text-sm text-white">
+                      {node.name}
+                    </div>
+                  ) : null;
+                })}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-white/90">配置操作</Label>
+              <Select defaultValue="sync_xray">
+                <SelectTrigger className="bg-white/5 border-white/20 text-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="sync_xray">同步Xray配置</SelectItem>
+                  <SelectItem value="sync_gost">同步Gost配置</SelectItem>
+                  <SelectItem value="sync_all">同步所有配置</SelectItem>
+                  <SelectItem value="restart_xray">重启Xray服务</SelectItem>
+                  <SelectItem value="restart_gost">重启Gost服务</SelectItem>
+                  <SelectItem value="restart_all">重启所有服务</SelectItem>
+                  <SelectItem value="update_agent">更新Agent</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="bg-yellow-500/10 border border-yellow-400/30 rounded-lg p-4 text-sm text-yellow-200">
+              <p className="font-medium mb-1">⚠️ 注意事项</p>
+              <ul className="list-disc list-inside space-y-1 text-yellow-200/80">
+                <li>批量操作将同时应用到所有选中的节点</li>
+                <li>重启服务可能导致短暂的连接中断</li>
+                <li>请确保在低峰时段执行批量操作</li>
+              </ul>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
             <Button
-              onClick={() => setInstallDialogOpen(false)}
-              className="bg-gradient-to-r from-cyan-500 to-purple-500 text-white"
+              variant="outline"
+              onClick={() => setBatchConfigOpen(false)}
+              className="border-white/20"
             >
-              关闭
+              取消
+            </Button>
+            <Button
+              onClick={async () => {
+                try {
+                  // TODO: 实现批量配置API调用
+                  toast.success('批量配置已下发');
+                  setBatchConfigOpen(false);
+                  setSelectedNodes([]);
+                } catch (error) {
+                  toast.error('批量配置失败');
+                }
+              }}
+              className="bg-gradient-to-r from-cyan-500 to-purple-500"
+            >
+              执行配置
             </Button>
           </div>
         </DialogContent>

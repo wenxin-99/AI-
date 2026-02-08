@@ -13,7 +13,6 @@ import {
   Server,
   Zap,
   Shield,
-  Users,
 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "./ui/button";
@@ -29,7 +28,6 @@ const navigation = [
   { name: "流量统计", href: "/traffic", icon: BarChart3 },
   { name: "订阅管理", href: "/subscription", icon: Link2 },
   { name: "节点管理", href: "/nodes", icon: Server },
-  { name: "用户管理", href: "/users", icon: Users },
   { name: "BBR 优化", href: "/bbr", icon: Zap },
   { name: "证书管理", href: "/certificates", icon: Shield },
   { name: "系统设置", href: "/settings", icon: Settings },

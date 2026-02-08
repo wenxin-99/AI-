@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { subscriptionService } from "@/services/subscription";
+import { copyToClipboard } from "@/lib/shareLink";
 import { Copy, Link2, Plus, QrCode, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -87,9 +88,13 @@ export default function SubscriptionManage() {
     }
   };
 
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(currentLink);
-    toast.success("链接已复制到剪贴板");
+  const handleCopyLink = async () => {
+    const success = await copyToClipboard(currentLink);
+    if (success) {
+      toast.success("链接已复制到剪贴板");
+    } else {
+      toast.error("复制失败");
+    }
   };
 
   const handleToggle = async (id: number) => {
