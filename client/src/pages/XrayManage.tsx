@@ -151,6 +151,14 @@ export default function XrayManage() {
     // gRPC配置
     grpc_service_name: "",
     grpc_multi_mode: false,
+    // XHTTP配置
+    xhttp_path: "/",
+    xhttp_host: "",
+    xhttp_mode: "auto",
+    // QUIC配置
+    quic_security: "none",
+    quic_key: "",
+    quic_header_type: "none",
     // TLS配置
     tls_server_name: "",
     tls_alpn: "h2,http/1.1",
@@ -317,6 +325,26 @@ export default function XrayManage() {
       };
     }
 
+    // XHTTP配置
+    if (streamSettings.network === "xhttp") {
+      settings.xhttpSettings = {
+        path: streamSettings.xhttp_path || "/",
+        host: streamSettings.xhttp_host || "",
+        mode: streamSettings.xhttp_mode || "auto",
+      };
+    }
+
+    // QUIC配置
+    if (streamSettings.network === "quic") {
+      settings.quicSettings = {
+        security: streamSettings.quic_security || "none",
+        key: streamSettings.quic_key || "",
+        header: {
+          type: streamSettings.quic_header_type || "none",
+        },
+      };
+    }
+
     // TLS配置
     if (streamSettings.security === "tls") {
       const selectedCert = certificates.find(c => c.id.toString() === streamSettings.certificate_id);
@@ -461,6 +489,12 @@ export default function XrayManage() {
       http_host: "",
       grpc_service_name: "",
       grpc_multi_mode: false,
+      xhttp_path: "/",
+      xhttp_host: "",
+      xhttp_mode: "auto",
+      quic_security: "none",
+      quic_key: "",
+      quic_header_type: "none",
       tls_server_name: "",
       tls_alpn: "h2,http/1.1",
       tls_fingerprint: "chrome",
@@ -965,7 +999,7 @@ export default function XrayManage() {
             <SelectItem value="tcp">TCP</SelectItem>
             <SelectItem value="ws">WebSocket</SelectItem>
             <SelectItem value="http">HTTP/2</SelectItem>
-            <SelectItem value="grpc">gRPC</SelectItem>
+            <SelectItem value="grpc">gRPC</SelectItem>            <SelectItem value="xhttp">XHTTP</SelectItem>
             <SelectItem value="quic">QUIC</SelectItem>
           </SelectContent>
         </Select>
@@ -1069,6 +1103,94 @@ export default function XrayManage() {
               checked={streamSettings.grpc_multi_mode}
               onCheckedChange={(checked) => setStreamSettings({ ...streamSettings, grpc_multi_mode: checked })}
             />
+          </div>
+        </>
+      )}
+
+      {/* XHTTP配置 */}
+      {streamSettings.network === "xhttp" && (
+        <>
+          <div className="space-y-2">
+            <Label>路径 (Path)</Label>
+            <Input
+              placeholder="/"
+              value={streamSettings.xhttp_path}
+              onChange={(e) => setStreamSettings({ ...streamSettings, xhttp_path: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>主机 (Host)</Label>
+            <Input
+              placeholder="example.com"
+              value={streamSettings.xhttp_host}
+              onChange={(e) => setStreamSettings({ ...streamSettings, xhttp_host: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>模式 (Mode)</Label>
+            <Select
+              value={streamSettings.xhttp_mode}
+              onValueChange={(value) => setStreamSettings({ ...streamSettings, xhttp_mode: value })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="auto">自动</SelectItem>
+                <SelectItem value="packet-up">Packet-Up</SelectItem>
+                <SelectItem value="stream-up">Stream-Up</SelectItem>
+                <SelectItem value="stream-one">Stream-One</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </>
+      )}
+
+      {/* QUIC配置 */}
+      {streamSettings.network === "quic" && (
+        <>
+          <div className="space-y-2">
+            <Label>QUIC 加密</Label>
+            <Select
+              value={streamSettings.quic_security}
+              onValueChange={(value) => setStreamSettings({ ...streamSettings, quic_security: value })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">无</SelectItem>
+                <SelectItem value="aes-128-gcm">AES-128-GCM</SelectItem>
+                <SelectItem value="chacha20-poly1305">ChaCha20-Poly1305</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>QUIC 密钥</Label>
+            <Input
+              placeholder="留空则使用默认密钥"
+              value={streamSettings.quic_key}
+              onChange={(e) => setStreamSettings({ ...streamSettings, quic_key: e.target.value })}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>QUIC 伪装类型</Label>
+            <Select
+              value={streamSettings.quic_header_type}
+              onValueChange={(value) => setStreamSettings({ ...streamSettings, quic_header_type: value })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">无</SelectItem>
+                <SelectItem value="srtp">SRTP</SelectItem>
+                <SelectItem value="utp">uTP</SelectItem>
+                <SelectItem value="wechat-video">微信视频通话</SelectItem>
+                <SelectItem value="dtls">DTLS 1.2</SelectItem>
+                <SelectItem value="wireguard">WireGuard</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </>
       )}
