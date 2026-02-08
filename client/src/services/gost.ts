@@ -22,8 +22,11 @@ export interface GostTunnel {
   name: string;
   in_node_id: number;
   out_node_id: number;
-  type: number; // 1=直连, 2=隧道
+  type: string; // "1"=port_forward, "2"=tunnel (backend returns string)
   protocol: string; // tcp, tls, ws, wss, quic
+  mode: string;
+  local_port: number;
+  remote_addr: string;
   enable: boolean;
   remark: string;
   forwards: GostForward[];
@@ -87,15 +90,17 @@ export const gostService = {
     await api.delete(`/api/v1/gost/tunnels/${id}`);
   },
 
-  // 切换隧道状态
-  toggleTunnel: async (id: number): Promise<GostTunnel> => {
-    const response: any = await api.post(`/api/v1/gost/tunnels/${id}/toggle`);
+  // 切换隧道状态 (通过更新 enable 字段实现)
+  toggleTunnel: async (id: number, enable: boolean): Promise<GostTunnel> => {
+    const response: any = await api.put(`/api/v1/gost/tunnels/${id}`, { enable });
     return response?.data || response;
   },
 
   // 获取转发规则列表
   getForwards: async (tunnelId: number): Promise<GostForward[]> => {
-    const response: any = await api.get(`/api/v1/gost/forwards/by-tunnel/${tunnelId}`);
+    const response: any = await api.get(`/api/v1/gost/forwards`, {
+      params: { tunnel_id: tunnelId },
+    });
     const data = response?.data || response;
     return Array.isArray(data) ? data : [];
   },
@@ -117,15 +122,20 @@ export const gostService = {
     await api.delete(`/api/v1/gost/forwards/${id}`);
   },
 
-  // 切换转发规则状态
-  toggleForward: async (id: number): Promise<GostForward> => {
-    const response: any = await api.post(`/api/v1/gost/forwards/${id}/toggle`);
+  // 切换转发规则状态 (通过更新 enable 字段实现)
+  toggleForward: async (id: number, enable: boolean): Promise<GostForward> => {
+    const response: any = await api.put(`/api/v1/gost/forwards/${id}`, { enable });
     return response?.data || response;
   },
 
-  // 预览节点 Gost 配置
-  previewConfig: async (nodeId: number): Promise<string> => {
-    const response: any = await api.get(`/api/v1/gost/config/preview/${nodeId}`);
-    return response?.data || response || "";
+  // 重启 Gost 服务
+  restart: async (): Promise<void> => {
+    await api.post("/api/v1/gost/restart");
+  },
+
+  // 获取 Gost 状态
+  getStatus: async (): Promise<{ running: boolean; version: string; enabled: boolean }> => {
+    const response: any = await api.get("/api/v1/gost/status");
+    return response?.data || response;
   },
 };

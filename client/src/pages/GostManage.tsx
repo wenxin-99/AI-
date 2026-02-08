@@ -169,7 +169,7 @@ export default function GostManage() {
       name: tunnel.name,
       in_node_id: tunnel.in_node_id,
       out_node_id: tunnel.out_node_id,
-      type: tunnel.type,
+      type: Number(tunnel.type) || 2,
       protocol: tunnel.protocol,
       remark: tunnel.remark || "",
     });
@@ -261,7 +261,9 @@ export default function GostManage() {
   };
 
   const handleToggleTunnel = async (id: number) => {
-    try { await gostService.toggleTunnel(id); toast.success("隧道状态已切换"); fetchData(); }
+    const tunnel = tunnels.find(t => t.id === id);
+    if (!tunnel) return;
+    try { await gostService.toggleTunnel(id, !tunnel.enable); toast.success("隧道状态已切换"); fetchData(); }
     catch { toast.error("切换隧道状态失败"); }
   };
 
@@ -299,20 +301,15 @@ export default function GostManage() {
     catch { toast.error("删除转发规则失败"); }
   };
 
-  const handleToggleForward = async (id: number) => {
-    try { await gostService.toggleForward(id); toast.success("状态已切换"); fetchData(); }
+  const handleToggleForward = async (id: number, currentEnable: boolean) => {
+    try { await gostService.toggleForward(id, !currentEnable); toast.success("状态已切换"); fetchData(); }
     catch { toast.error("切换状态失败"); }
   };
 
   // ============ 配置预览 ============
 
-  const handlePreviewConfig = async (nodeId: number) => {
-    try {
-      const config = await gostService.previewConfig(nodeId);
-      setConfigPreviewContent(config || "# 该节点没有 Gost 配置");
-      setConfigPreviewNodeName(getNodeName(nodeId));
-      setConfigPreviewOpen(true);
-    } catch { toast.error("获取配置预览失败"); }
+  const handlePreviewConfig = async (_nodeId: number) => {
+    toast.info("配置预览功能待后端支持");
   };
 
   // ============ 统计 ============
@@ -400,8 +397,8 @@ export default function GostManage() {
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-medium text-white/90 truncate">{tunnel.name}</span>
-                          <Badge variant="outline" className={tunnel.type === 2 ? "text-cyan-400 border-cyan-500/30 text-xs" : "text-amber-400 border-amber-500/30 text-xs"}>
-                            {tunnel.type === 2 ? "加密隧道" : "直连"}
+                          <Badge variant="outline" className={String(tunnel.type) === "2" ? "text-cyan-400 border-cyan-500/30 text-xs" : "text-amber-400 border-amber-500/30 text-xs"}>
+                            {String(tunnel.type) === "2" ? "加密隧道" : "直连"}
                           </Badge>
                           <Badge variant="outline" className="text-white/50 border-white/10 text-xs">{tunnel.protocol.toUpperCase()}</Badge>
                           <Badge className={tunnel.enable ? "bg-green-500/20 text-green-400 border-green-500/30 text-xs" : "bg-red-500/20 text-red-400 border-red-500/30 text-xs"}>
@@ -478,7 +475,7 @@ export default function GostManage() {
                                     </TableCell>
                                     <TableCell className="text-right pr-6">
                                       <div className="flex items-center justify-end gap-1">
-                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-white/60 hover:text-white" onClick={() => handleToggleForward(fwd.id)}><Power className="w-3.5 h-3.5" /></Button>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-white/60 hover:text-white" onClick={() => handleToggleForward(fwd.id, fwd.enable)}><Power className="w-3.5 h-3.5" /></Button>
                                         <Button variant="ghost" size="icon" className="h-7 w-7 text-white/60 hover:text-white" onClick={() => openEditForward(fwd)}><Edit className="w-3.5 h-3.5" /></Button>
                                         <Button variant="ghost" size="icon" className="h-7 w-7 text-red-400/60 hover:text-red-400" onClick={() => handleDeleteForward(fwd.id)}><Trash2 className="w-3.5 h-3.5" /></Button>
                                       </div>
