@@ -208,4 +208,10 @@ export const xrayService = {
       15000
     );
   },
+
+  // 生成 x25519 密钥对
+  generateKeypair: async (): Promise<{ private_key: string; public_key: string }> => {
+    const response = await api.post("/api/v1/xray/generate-keypair");
+    return response?.data?.data || response?.data || response;
+  },
 };

@@ -1141,19 +1141,43 @@ export default function XrayManage() {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>私钥 (Private Key) - 服务端</Label>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowKeys(!showKeys)}
-                className="h-6 text-xs"
-              >
-                {showKeys ? <EyeOff className="w-3 h-3 mr-1" /> : <Eye className="w-3 h-3 mr-1" />}
-                {showKeys ? "隐藏" : "显示"}
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      const keypair = await xrayService.generateKeypair();
+                      setStreamSettings({
+                        ...streamSettings,
+                        reality_private_key: keypair.private_key,
+                        reality_public_key: keypair.public_key,
+                      });
+                      toast.success("密钥对生成成功");
+                    } catch (error) {
+                      console.error("生成密钥对失败:", error);
+                      toast.error("生成密钥对失败");
+                    }
+                  }}
+                  className="h-6 text-xs"
+                >
+                  <Key className="w-3 h-3 mr-1" />
+                  生成
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowKeys(!showKeys)}
+                  className="h-6 text-xs"
+                >
+                  {showKeys ? <EyeOff className="w-3 h-3 mr-1" /> : <Eye className="w-3 h-3 mr-1" />}
+                  {showKeys ? "隐藏" : "显示"}
+                </Button>
+              </div>
             </div>
             <Input
               type={showKeys ? "text" : "password"}
-              placeholder="使用 xray x25519 生成"
+              placeholder="点击上方'生成'按钮自动生成"
               value={streamSettings.reality_private_key}
               onChange={(e) => setStreamSettings({ ...streamSettings, reality_private_key: e.target.value })}
               className="font-mono text-sm"
@@ -1163,7 +1187,7 @@ export default function XrayManage() {
             <Label>公钥 (Public Key) - 客户端</Label>
             <Input
               type={showKeys ? "text" : "password"}
-              placeholder="使用 xray x25519 生成"
+              placeholder="点击上方'生成'按钮自动生成"
               value={streamSettings.reality_public_key}
               onChange={(e) => setStreamSettings({ ...streamSettings, reality_public_key: e.target.value })}
               className="font-mono text-sm"

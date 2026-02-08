@@ -102,4 +102,10 @@ export const nodeService = {
     });
     return response;
   },
+
+  // 生成安装脚本
+  generateInstallScript: async (params: { node_type: string }) => {
+    const response = await apiClient.post("/api/v1/node/install-script", params);
+    return response;
+  },
 };
