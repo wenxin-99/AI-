@@ -203,6 +203,8 @@ export default function GostManage() {
   const handleSaveTunnel = async () => {
     if (!tunnelForm.name) { toast.error("请输入隧道名称"); return; }
     if (!tunnelForm.in_node_id || !tunnelForm.out_node_id) { toast.error("请选择入口节点和出口节点"); return; }
+    if (!nodes.find(n => n.id === tunnelForm.in_node_id)) { toast.error("入口节点已被删除，请重新选择"); return; }
+    if (!nodes.find(n => n.id === tunnelForm.out_node_id)) { toast.error("出口节点已被删除，请重新选择"); return; }
     if (tunnelForm.in_node_id === tunnelForm.out_node_id) { toast.error("入口节点和出口节点不能相同"); return; }
 
     const validForwards = inlineForwards.filter((f) => f.in_port > 0 || f.remote_addr);
@@ -217,7 +219,7 @@ export default function GostManage() {
       let tunnelId: number;
 
       if (editingTunnel) {
-        await gostService.updateTunnel(editingTunnel.id, tunnelForm);
+        await gostService.updateTunnel(editingTunnel.id, { ...tunnelForm, enable: editingTunnel.enable });
         tunnelId = editingTunnel.id;
         toast.success("隧道更新成功");
 
@@ -246,9 +248,10 @@ export default function GostManage() {
       if (validForwards.length > 0) toast.success(`已保存 ${validForwards.length} 条转发规则`);
       setTunnelDialogOpen(false);
       fetchData();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to save tunnel:", error);
-      toast.error(editingTunnel ? "更新隧道失败" : "创建隧道失败");
+      const msg = error?.response?.data?.message || (editingTunnel ? "更新隧道失败" : "创建隧道失败");
+      toast.error(msg);
     } finally {
       setSaving(false);
     }
@@ -263,7 +266,7 @@ export default function GostManage() {
   const handleToggleTunnel = async (id: number) => {
     const tunnel = tunnels.find(t => t.id === id);
     if (!tunnel) return;
-    try { await gostService.toggleTunnel(id, !tunnel.enable); toast.success("隧道状态已切换"); fetchData(); }
+    try { await gostService.toggleTunnel(id, tunnel); toast.success("隧道状态已切换"); fetchData(); }
     catch { toast.error("切换隧道状态失败"); }
   };
 
@@ -301,8 +304,15 @@ export default function GostManage() {
     catch { toast.error("删除转发规则失败"); }
   };
 
-  const handleToggleForward = async (id: number, currentEnable: boolean) => {
-    try { await gostService.toggleForward(id, !currentEnable); toast.success("状态已切换"); fetchData(); }
+  const handleToggleForward = async (id: number, _currentEnable: boolean) => {
+    // Find the full forward object from tunnels data
+    let forward: GostForward | undefined;
+    for (const t of tunnels) {
+      forward = (t.forwards || []).find(f => f.id === id);
+      if (forward) break;
+    }
+    if (!forward) { toast.error("找不到转发规则"); return; }
+    try { await gostService.toggleForward(id, forward); toast.success("状态已切换"); fetchData(); }
     catch { toast.error("切换状态失败"); }
   };
 
@@ -520,22 +530,34 @@ export default function GostManage() {
                   <div className="space-y-2">
                     <Label>入口节点</Label>
                     <Select value={tunnelForm.in_node_id ? tunnelForm.in_node_id.toString() : "placeholder"} onValueChange={(v) => v !== "placeholder" && setTunnelForm({ ...tunnelForm, in_node_id: parseInt(v) })}>
-                      <SelectTrigger><SelectValue placeholder="选择入口节点" /></SelectTrigger>
+                      <SelectTrigger className={tunnelForm.in_node_id && !nodes.find(n => n.id === tunnelForm.in_node_id) ? "border-red-500/50" : ""}><SelectValue placeholder="选择入口节点" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="placeholder" disabled>选择入口节点</SelectItem>
+                        {tunnelForm.in_node_id > 0 && !nodes.find(n => n.id === tunnelForm.in_node_id) && (
+                          <SelectItem value={tunnelForm.in_node_id.toString()} disabled className="text-red-400">⚠ 已删除的节点 #{tunnelForm.in_node_id}（请重新选择）</SelectItem>
+                        )}
                         {nodes.map((n) => (<SelectItem key={n.id} value={n.id.toString()}>{n.name} ({n.host})</SelectItem>))}
                       </SelectContent>
                     </Select>
+                    {tunnelForm.in_node_id > 0 && !nodes.find(n => n.id === tunnelForm.in_node_id) && (
+                      <p className="text-xs text-red-400">该节点已被删除，请重新选择入口节点</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>出口节点</Label>
                     <Select value={tunnelForm.out_node_id ? tunnelForm.out_node_id.toString() : "placeholder"} onValueChange={(v) => v !== "placeholder" && setTunnelForm({ ...tunnelForm, out_node_id: parseInt(v) })}>
-                      <SelectTrigger><SelectValue placeholder="选择出口节点" /></SelectTrigger>
+                      <SelectTrigger className={tunnelForm.out_node_id && !nodes.find(n => n.id === tunnelForm.out_node_id) ? "border-red-500/50" : ""}><SelectValue placeholder="选择出口节点" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="placeholder" disabled>选择出口节点</SelectItem>
+                        {tunnelForm.out_node_id > 0 && !nodes.find(n => n.id === tunnelForm.out_node_id) && (
+                          <SelectItem value={tunnelForm.out_node_id.toString()} disabled className="text-red-400">⚠ 已删除的节点 #{tunnelForm.out_node_id}（请重新选择）</SelectItem>
+                        )}
                         {nodes.map((n) => (<SelectItem key={n.id} value={n.id.toString()}>{n.name} ({n.host})</SelectItem>))}
                       </SelectContent>
                     </Select>
+                    {tunnelForm.out_node_id > 0 && !nodes.find(n => n.id === tunnelForm.out_node_id) && (
+                      <p className="text-xs text-red-400">该节点已被删除，请重新选择出口节点</p>
+                    )}
                   </div>
                 </div>
 

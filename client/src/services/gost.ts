@@ -41,6 +41,7 @@ export interface CreateTunnelRequest {
   type: number;
   protocol: string;
   remark?: string;
+  enable?: boolean;
 }
 
 export interface CreateForwardRequest {
@@ -50,6 +51,7 @@ export interface CreateForwardRequest {
   out_port: number;
   remote_addr: string;
   remark?: string;
+  enable?: boolean;
 }
 
 // ============ 服务 ============
@@ -90,9 +92,17 @@ export const gostService = {
     await api.delete(`/api/v1/gost/tunnels/${id}`);
   },
 
-  // 切换隧道状态 (通过更新 enable 字段实现)
-  toggleTunnel: async (id: number, enable: boolean): Promise<GostTunnel> => {
-    const response: any = await api.put(`/api/v1/gost/tunnels/${id}`, { enable });
+  // 切换隧道状态 (通过获取完整数据后翻转 enable 再 PUT)
+  toggleTunnel: async (id: number, tunnel: GostTunnel): Promise<GostTunnel> => {
+    const response: any = await api.put(`/api/v1/gost/tunnels/${id}`, {
+      name: tunnel.name,
+      in_node_id: tunnel.in_node_id,
+      out_node_id: tunnel.out_node_id,
+      type: Number(tunnel.type) || 2,
+      protocol: tunnel.protocol,
+      remark: tunnel.remark || "",
+      enable: !tunnel.enable,
+    });
     return response?.data || response;
   },
 
@@ -122,9 +132,17 @@ export const gostService = {
     await api.delete(`/api/v1/gost/forwards/${id}`);
   },
 
-  // 切换转发规则状态 (通过更新 enable 字段实现)
-  toggleForward: async (id: number, enable: boolean): Promise<GostForward> => {
-    const response: any = await api.put(`/api/v1/gost/forwards/${id}`, { enable });
+  // 切换转发规则状态 (通过获取完整数据后翻转 enable 再 PUT)
+  toggleForward: async (id: number, forward: GostForward): Promise<GostForward> => {
+    const response: any = await api.put(`/api/v1/gost/forwards/${id}`, {
+      tunnel_id: forward.tunnel_id,
+      name: forward.name,
+      in_port: forward.in_port,
+      out_port: forward.out_port,
+      remote_addr: forward.remote_addr,
+      remark: forward.remark || "",
+      enable: !forward.enable,
+    });
     return response?.data || response;
   },
 

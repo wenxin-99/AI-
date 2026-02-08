@@ -118,6 +118,14 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 				gost.GET("/tunnels/:id", gostController.GetTunnel)
 				gost.PUT("/tunnels/:id", gostController.UpdateTunnel)
 				gost.DELETE("/tunnels/:id", gostController.DeleteTunnel)
+				// Toggle is handled via PUT with enable field
+
+				// 转发规则管理
+				gost.GET("/forwards", gostController.ListForwards)
+				gost.POST("/forwards", gostController.CreateForward)
+				gost.PUT("/forwards/:id", gostController.UpdateForward)
+				gost.DELETE("/forwards/:id", gostController.DeleteForward)
+				// Toggle is handled via PUT with enable field
 
 				// Gost控制
 				gost.POST("/restart", gostController.Restart)
