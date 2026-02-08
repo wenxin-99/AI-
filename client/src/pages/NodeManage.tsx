@@ -29,6 +29,7 @@ import TrafficSummary from "@/components/TrafficSummary";
 import { copyToClipboard } from "@/lib/shareLink";
 import {
   Activity,
+  Clock,
   Code,
   Copy,
   Cpu,
@@ -38,6 +39,7 @@ import {
   RefreshCw,
   Server,
   Settings,
+  Terminal,
   Trash2,
   Wifi,
   WifiOff,
@@ -53,6 +55,8 @@ export default function NodeManage() {
   const [installScript, setInstallScript] = useState("");
   const [installOneLiner, setInstallOneLiner] = useState("");
   const [loadingScript, setLoadingScript] = useState(false);
+  const [installNodeId, setInstallNodeId] = useState<number | null>(null);
+  const [installNodeName, setInstallNodeName] = useState("");
   const [batchConfigOpen, setBatchConfigOpen] = useState(false);
   const [selectedNodes, setSelectedNodes] = useState<number[]>([]);
   const [editingNode, setEditingNode] = useState<Node | null>(null);
@@ -66,18 +70,23 @@ export default function NodeManage() {
 
   useEffect(() => {
     loadNodes();
+    // 每30秒自动刷新节点状态
+    const interval = setInterval(loadNodes, 30000);
+    return () => clearInterval(interval);
   }, []);
 
-  useEffect(() => {
-    if (installScriptOpen && !installScript) {
-      loadInstallScript();
-    }
-  }, [installScriptOpen]);
-
-  const loadInstallScript = async () => {
+  const loadInstallScript = async (nodeId?: number) => {
     try {
       setLoadingScript(true);
-      const response: any = await nodeService.generateInstallScript({ node_type: "both" });
+      setInstallScript("");
+      setInstallOneLiner("");
+      const params: { node_id?: number; node_type?: string } = {};
+      if (nodeId) {
+        params.node_id = nodeId;
+      } else {
+        params.node_type = "both";
+      }
+      const response: any = await nodeService.generateInstallScript(params);
       let script = response?.data?.script || response?.script || "";
       let oneLiner = response?.data?.one_liner || response?.one_liner || "";
       // 后端不检测 X-Forwarded-Proto，可能生成 http:// 的 PANEL_URL
@@ -96,11 +105,29 @@ export default function NodeManage() {
     }
   };
 
+  const openInstallScript = (node?: Node) => {
+    if (node) {
+      setInstallNodeId(node.id);
+      setInstallNodeName(node.name);
+    } else {
+      setInstallNodeId(null);
+      setInstallNodeName("");
+    }
+    setInstallScript("");
+    setInstallOneLiner("");
+    setInstallScriptOpen(true);
+  };
+
+  useEffect(() => {
+    if (installScriptOpen) {
+      loadInstallScript(installNodeId || undefined);
+    }
+  }, [installScriptOpen, installNodeId]);
+
   const loadNodes = async () => {
     try {
       setLoading(true);
       const response: any = await nodeService.list();
-      // response 被拦截器解包后是: { success, data: { nodes: [...], total, page }, message }
       const nodeList = response?.data?.nodes || response?.nodes || [];
       setNodes(Array.isArray(nodeList) ? nodeList : []);
     } catch (error) {
@@ -224,6 +251,37 @@ export default function NodeManage() {
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + " " + sizes[i];
   };
 
+  const formatHeartbeat = (heartbeat: string | null) => {
+    if (!heartbeat) return "从未连接";
+    try {
+      const date = new Date(heartbeat);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffSec = Math.floor(diffMs / 1000);
+      if (diffSec < 60) return `${diffSec}秒前`;
+      const diffMin = Math.floor(diffSec / 60);
+      if (diffMin < 60) return `${diffMin}分钟前`;
+      const diffHour = Math.floor(diffMin / 60);
+      if (diffHour < 24) return `${diffHour}小时前`;
+      const diffDay = Math.floor(diffHour / 24);
+      return `${diffDay}天前`;
+    } catch {
+      return "未知";
+    }
+  };
+
+  const isNodeAlive = (heartbeat: string | null) => {
+    if (!heartbeat) return false;
+    try {
+      const date = new Date(heartbeat);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      return diffMs < 90000; // 90秒内有心跳视为在线
+    } catch {
+      return false;
+    }
+  };
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -235,12 +293,12 @@ export default function NodeManage() {
           </div>
           <div className="flex gap-2">
             <Button
-              onClick={() => setInstallScriptOpen(true)}
+              onClick={() => openInstallScript()}
               variant="outline"
               className="border-white/20 hover:bg-cyan-500/20 hover:border-cyan-400/50"
             >
               <Code className="w-4 h-4 mr-2" />
-              安装脚本
+              通用安装脚本
             </Button>
             <Button
               onClick={() => setBatchConfigOpen(true)}
@@ -277,7 +335,9 @@ export default function NodeManage() {
           </Card>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
-            {nodes.map((node) => (
+            {nodes.map((node) => {
+              const alive = isNodeAlive(node.last_heartbeat);
+              return (
               <Card
                 key={node.id}
                 className={`glass-card border-white/20 p-6 hover:border-cyan-400/30 transition-all duration-300 ${
@@ -299,21 +359,38 @@ export default function NodeManage() {
                         {node.name}
                       </h3>
                       <div
-                        className={`px-2 py-0.5 rounded text-xs ${getStatusColor(
-                          node.status
-                        )}`}
+                        className={`px-2 py-0.5 rounded text-xs flex items-center gap-1 ${
+                          alive ? 'text-green-400 bg-green-500/20' : 'text-gray-400 bg-gray-500/20'
+                        }`}
                       >
-                        {node.status === "online" && <Wifi className="w-3 h-3 inline mr-1" />}
-                        {node.status === "offline" && <WifiOff className="w-3 h-3 inline mr-1" />}
-                        {node.status}
+                        {alive ? (
+                          <>
+                            <span className="relative flex h-2 w-2">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                            </span>
+                            在线
+                          </>
+                        ) : (
+                          <>
+                            <WifiOff className="w-3 h-3" />
+                            离线
+                          </>
+                        )}
                       </div>
                     </div>
-                    <div
-                      className={`inline-block px-3 py-1 rounded-full bg-gradient-to-r ${getTypeColor(
-                        node.type
-                      )} text-white text-xs font-medium`}
-                    >
-                      {node.type.toUpperCase()}
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`inline-block px-3 py-1 rounded-full bg-gradient-to-r ${getTypeColor(
+                          node.type
+                        )} text-white text-xs font-medium`}
+                      >
+                        {node.type.toUpperCase()}
+                      </div>
+                      <div className="flex items-center gap-1 text-xs text-white/40">
+                        <Clock className="w-3 h-3" />
+                        <span>{formatHeartbeat(node.last_heartbeat)}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -344,11 +421,11 @@ export default function NodeManage() {
                 </div>
 
                 {/* 操作按钮 */}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleEdit(node)}
+                    onClick={(e) => { e.stopPropagation(); handleEdit(node); }}
                     className="flex-1 border-white/20 hover:bg-cyan-500/20 hover:border-cyan-400/50"
                   >
                     编辑
@@ -356,31 +433,33 @@ export default function NodeManage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleSync(node.id)}
-                    className="flex-1 border-white/20 hover:bg-purple-500/20 hover:border-purple-400/50"
+                    onClick={(e) => { e.stopPropagation(); openInstallScript(node); }}
+                    className="flex-1 border-white/20 hover:bg-green-500/20 hover:border-green-400/50"
+                    title="生成此节点的安装脚本"
                   >
-                    <RefreshCw className="w-4 h-4 mr-1" />
-                    同步
+                    <Terminal className="w-4 h-4 mr-1" />
+                    安装
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleToggle(node.id)}
-                    className="border-white/20 hover:bg-orange-500/20 hover:border-orange-400/50"
+                    onClick={(e) => { e.stopPropagation(); handleSync(node.id); }}
+                    className="border-white/20 hover:bg-purple-500/20 hover:border-purple-400/50"
                   >
-                    {node.status === "online" ? "停用" : "启用"}
+                    <RefreshCw className="w-4 h-4" />
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleDelete(node.id)}
+                    onClick={(e) => { e.stopPropagation(); handleDelete(node.id); }}
                     className="border-white/20 hover:bg-red-500/20 hover:border-red-400/50"
                   >
                     <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
               </Card>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -440,7 +519,7 @@ export default function NodeManage() {
                   setFormData({ ...formData, api_token: e.target.value })
                 }
                 className="bg-white/5 border-white/20 text-white"
-                placeholder="节点API认证令牌"
+                placeholder="节点API认证令牌（留空自动生成）"
               />
             </div>
             <div className="space-y-2">
@@ -486,13 +565,27 @@ export default function NodeManage() {
           <DialogHeader className="flex-shrink-0">
             <DialogTitle className="gradient-text flex items-center gap-2">
               <Code className="w-5 h-5" />
-              节点安装脚本
+              {installNodeName ? `节点安装脚本 - ${installNodeName}` : '通用安装脚本'}
             </DialogTitle>
             <DialogDescription className="text-white/60">
-              在远程服务器上运行以下命令自动安装节点
+              {installNodeName
+                ? `为节点「${installNodeName}」生成的专属安装脚本，Token 已自动匹配`
+                : '在远程服务器上运行以下命令自动安装节点（将生成新 Token）'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-4 overflow-y-auto flex-1 min-h-0">
+            {/* 提示信息 */}
+            {installNodeId && (
+              <div className="bg-green-500/10 border border-green-400/30 rounded-lg p-3 text-sm text-green-200">
+                <p>此脚本使用节点「{installNodeName}」的 API Token，安装后 Agent 将自动与面板建立心跳连接。</p>
+              </div>
+            )}
+            {!installNodeId && (
+              <div className="bg-yellow-500/10 border border-yellow-400/30 rounded-lg p-3 text-sm text-yellow-200">
+                <p>建议先在面板中创建节点，然后点击节点卡片上的"安装"按钮生成专属脚本，以确保 Token 匹配。</p>
+              </div>
+            )}
+
             {/* 一键安装命令 */}
             <div className="space-y-2">
               <div className="flex items-center justify-between mb-1">
@@ -560,7 +653,7 @@ export default function NodeManage() {
             <div className="space-y-2">
               <Label className="text-white/90">使用说明</Label>
               <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-2 text-sm text-white/70">
-                <p>1. 复制上方“一键安装命令”，粘贴到服务器终端运行</p>
+                <p>1. 复制上方"一键安装命令"，粘贴到服务器终端运行</p>
                 <p>2. 脚本会自动安装 Xray/Gost 并注册到面板</p>
                 <p>3. <strong className="text-cyan-400">国内VPS自动使用镜像加速</strong>，无需手动配置</p>
                 <p>4. 支持的系统: Ubuntu, Debian, CentOS, RHEL | 架构: x86_64, aarch64</p>
@@ -590,14 +683,14 @@ export default function NodeManage() {
             <Button
               onClick={async () => {
                 if (!installScript) {
-                  toast.error('安装脚本未加载');
+                  toast.error('脚本未加载');
                   return;
                 }
                 const blob = new Blob([installScript], { type: 'text/x-sh' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'node-install.sh';
+                a.download = installNodeName ? `install-${installNodeName}.sh` : 'node-install.sh';
                 a.click();
                 URL.revokeObjectURL(url);
                 toast.success('脚本已下载');
@@ -662,7 +755,7 @@ export default function NodeManage() {
               </Select>
             </div>
             <div className="bg-yellow-500/10 border border-yellow-400/30 rounded-lg p-4 text-sm text-yellow-200">
-              <p className="font-medium mb-1">⚠️ 注意事项</p>
+              <p className="font-medium mb-1">注意事项</p>
               <ul className="list-disc list-inside space-y-1 text-yellow-200/80">
                 <li>批量操作将同时应用到所有选中的节点</li>
                 <li>重启服务可能导致短暂的连接中断</li>
