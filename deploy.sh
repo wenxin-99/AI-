@@ -87,7 +87,7 @@ chmod -R 755 /var/www/uniproxy-panel
 echo -e "${YELLOW}构建后端服务...${NC}"
 cd backend
 go mod download
-go build -o uniproxy-panel main.go
+go build -o uniproxy-panel cmd/main.go
 
 # 创建后端systemd服务
 echo -e "${YELLOW}创建后端systemd服务...${NC}"
