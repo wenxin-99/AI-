@@ -360,8 +360,16 @@ fi
 
 # 验证修改
 print_info "验证配置更新..."
-NEW_PORT=$(awk '/^server:/,/^[a-z]/ { if (/^  port:/) { print $2; exit } }' "$ACTIVE_CONFIG")
-print_info "读取到的端口: '$NEW_PORT'"
+# 使用 awk 读取端口，处理引号
+NEW_PORT=$(awk '/^server:/,/^[a-z]/ { 
+    if (/^  port:/) { 
+        gsub(/"/, "", $2);  # 移除双引号
+        gsub(/'''/, "", $2);  # 移除单引号
+        print $2; 
+        exit 
+    } 
+}' "$ACTIVE_CONFIG")
+print_info "读取到的端口: '$NEW_PORT' (期望: $CONFIG_PORT)"
 
 if [ -n "$NEW_PORT" ] && [ "$NEW_PORT" = "$CONFIG_PORT" ]; then
     print_success "端口配置更新成功: $NEW_PORT"
@@ -519,7 +527,31 @@ if systemctl is-active --quiet uniproxy-panel; then
     fi
 else
     print_error "后端服务启动失败"
-    print_info "查看日志: journalctl -u uniproxy-panel -n 50"
+    print_info "查看详细日志..."
+    
+    # 显示最近的错误日志
+    journalctl -u uniproxy-panel -n 20 --no-pager
+    
+    # 尝试诊断常见问题
+    print_info "诊断常见问题..."
+    
+    # 检查端口是否被占用
+    if ss -tlnp 2>/dev/null | grep -q ":$BACKEND_PORT "; then
+        print_warning "端口 $BACKEND_PORT 已被占用"
+        ss -tlnp | grep ":$BACKEND_PORT "
+    fi
+    
+    # 检查配置文件是否存在
+    if [ ! -f "$ACTIVE_CONFIG" ]; then
+        print_error "配置文件不存在: $ACTIVE_CONFIG"
+    fi
+    
+    # 检查可执行文件是否存在
+    if [ ! -f "$INSTALL_DIR/backend/uniproxy-panel" ]; then
+        print_error "后端可执行文件不存在"
+    fi
+    
+    print_info "请查看上面的日志输出，或执行: journalctl -u uniproxy-panel -n 50"
     exit 1
 fi
 
