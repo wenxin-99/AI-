@@ -1,0 +1,36 @@
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# 文档
+*.md
+docs/
+
+# CI/CD
+.github/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 临时文件
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 脚本
+*.sh
+
+# 环境文件
+.env
+.env.*
+
+# 日志
+*.log
+
+# 测试
+coverage/
+*.test

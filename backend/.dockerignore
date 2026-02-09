@@ -1,0 +1,48 @@
+# 构建产物
+uniproxy-panel
+uniproxy
+*.exe
+*.dll
+*.so
+*.dylib
+
+# 测试文件
+*.test
+*.out
+coverage.out
+coverage.html
+
+# 临时文件
+*.swp
+*.swo
+*~
+.DS_Store
+
+# IDE 配置
+.idea/
+.vscode/
+*.iml
+
+# Git
+.git/
+.gitignore
+
+# 文档
+*.md
+!README.md
+
+# 数据文件
+data/
+*.db
+*.sqlite
+
+# 日志
+*.log
+
+# 环境文件
+.env
+.env.local
+
+# Air 配置（开发用）
+.air.toml
+tmp/
