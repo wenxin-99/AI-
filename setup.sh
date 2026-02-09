@@ -73,33 +73,58 @@ export PATH=$PATH:/usr/local/go/bin
 export GOPATH=/root/go
 export GOPROXY=https://goproxy.cn,direct
 
-# 检测 main.go 位置
-if [ -f "cmd/main.go" ]; then
-    MAIN_GO_PATH="./cmd/main.go"
-    print_success "检测到 cmd/main.go"
-elif [ -f "main.go" ]; then
-    MAIN_GO_PATH="./main.go"
-    print_success "检测到 main.go"
+# 使用 Makefile 编译（如果存在）
+if [ -f "Makefile" ]; then
+    print_info "使用 Makefile 编译..."
+    if make clean build; then
+        print_success "后端编译成功 ($(ls -lh uniproxy-panel | awk '{print $5}'))"
+    else
+        print_error "Makefile 编译失败，尝试直接编译..."
+        # 回退到直接编译
+        if [ -f "cmd/main.go" ]; then
+            MAIN_GO_PATH="./cmd/main.go"
+        elif [ -f "main.go" ]; then
+            MAIN_GO_PATH="./main.go"
+        else
+            print_error "找不到 main.go 文件"
+            exit 1
+        fi
+        /usr/local/go/bin/go mod download
+        rm -f uniproxy-panel uniproxy
+        if /usr/local/go/bin/go build -o uniproxy-panel $MAIN_GO_PATH; then
+            print_success "后端编译成功 ($(ls -lh uniproxy-panel | awk '{print $5}'))"
+        else
+            print_error "后端编译失败"
+            exit 1
+        fi
+    fi
 else
-    print_error "找不到 main.go 文件"
-    exit 1
-fi
-
-# 下载依赖
-print_info "下载 Go 依赖..."
-/usr/local/go/bin/go mod download
-
-# 清理旧文件
-rm -f uniproxy-panel uniproxy
-
-# 编译（使用相对路径）
-print_info "编译后端程序..."
-if /usr/local/go/bin/go build -o uniproxy-panel $MAIN_GO_PATH; then
-    print_success "后端编译成功 ($(ls -lh uniproxy-panel | awk '{print $5}'))"
-else
-    print_error "后端编译失败"
-    print_error "请检查 Go 版本和依赖是否正确安装"
-    exit 1
+    # 没有 Makefile，使用传统方式
+    print_info "使用传统方式编译..."
+    if [ -f "cmd/main.go" ]; then
+        MAIN_GO_PATH="./cmd/main.go"
+        print_success "检测到 cmd/main.go"
+    elif [ -f "main.go" ]; then
+        MAIN_GO_PATH="./main.go"
+        print_success "检测到 main.go"
+    else
+        print_error "找不到 main.go 文件"
+        exit 1
+    fi
+    
+    print_info "下载 Go 依赖..."
+    /usr/local/go/bin/go mod download
+    
+    rm -f uniproxy-panel uniproxy
+    
+    print_info "编译后端程序..."
+    if /usr/local/go/bin/go build -o uniproxy-panel $MAIN_GO_PATH; then
+        print_success "后端编译成功 ($(ls -lh uniproxy-panel | awk '{print $5}'))"
+    else
+        print_error "后端编译失败"
+        print_error "请检查 Go 版本和依赖是否正确安装"
+        exit 1
+    fi
 fi
 
 cd /opt/uniproxy-panel
