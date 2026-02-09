@@ -894,15 +894,17 @@ func generateInstallScript(panelURL, apiToken, nodeName, nodeType string) string
 	sb.WriteString("info \"公网 IP: ${PUBLIC_IP}\"\n\n")
 
 	sb.WriteString("# 执行注册请求，显示详细错误\n")
-	sb.WriteString("HTTP_CODE=$(curl -w '%{http_code}' -o /tmp/register_response.json -X POST \"${PANEL_URL}/api/v1/node/register\" \\\n")
+	sb.WriteString("HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/register_response.json -X POST \"${PANEL_URL}/api/v1/node/register\" \\\n")
 	sb.WriteString("  -H \"X-API-Token: ${API_TOKEN}\" \\\n")
 	sb.WriteString("  -H \"Content-Type: application/json\" \\\n")
-	sb.WriteString("  -d \"{\\\"name\\\": \\\"${NODE_NAME}\\\", \\\"host\\\": \\\"${PUBLIC_IP}\\\", \\\"port\\\": ${NODE_PORT}, \\\"type\\\": \\\"${NODE_TYPE}\\\", \\\"api_token\\\": \\\"${API_TOKEN}\\\"}\" 2>&1)\n\n")
+	sb.WriteString("  -d \"{\\\"name\\\": \\\"${NODE_NAME}\\\", \\\"host\\\": \\\"${PUBLIC_IP}\\\", \\\"port\\\": ${NODE_PORT}, \\\"type\\\": \\\"${NODE_TYPE}\\\", \\\"api_token\\\": \\\"${API_TOKEN}\\\"}\")\n\n")
 
-	sb.WriteString("REGISTER_RESULT=$(cat /tmp/register_response.json 2>/dev/null || echo '{\"success\": false, \"message\": \"\u8bf7\u6c42\u5931\u8d25\"}')\n")
+	sb.WriteString("REGISTER_RESULT=$(cat /tmp/register_response.json 2>/dev/null || echo '{\"success\": false, \"message\": \"请求失败\"}')\n")
 	sb.WriteString("info \"HTTP 状态码: $HTTP_CODE\"\n")
 	sb.WriteString("info \"响应内容: $REGISTER_RESULT\"\n\n")
 
+	sb.WriteString("# 提取最后 3 位数字作为 HTTP 状态码（避免 curl 进度信息干扰）\n")
+	sb.WriteString("HTTP_CODE=${HTTP_CODE: -3}\n")
 	sb.WriteString("if [[ \"$HTTP_CODE\" == \"200\" ]] && echo \"$REGISTER_RESULT\" | jq -e '.success' &>/dev/null; then\n")
 	sb.WriteString("  success \"节点注册成功!\"\n")
 	sb.WriteString("  NODE_ID=$(echo \"$REGISTER_RESULT\" | jq -r '.data.id // empty')\n")
