@@ -360,15 +360,21 @@ fi
 
 # 验证修改
 print_info "验证配置更新..."
-# 使用 awk 读取端口，处理引号
-NEW_PORT=$(awk '/^server:/,/^[a-z]/ { 
-    if (/^  port:/) { 
-        gsub(/"/, "", $2);  # 移除双引号
-        gsub(/'''/, "", $2);  # 移除单引号
-        print $2; 
-        exit 
-    } 
-}' "$ACTIVE_CONFIG")
+# 使用多种方法读取端口，确保可靠性
+
+# 方法1: 使用 grep + awk
+NEW_PORT=$(grep -A 2 "^server:" "$ACTIVE_CONFIG" | grep "port:" | awk '{print $2}' | tr -d '"''')
+
+# 如果方法1失败，尝试方法2: 直接 grep
+if [ -z "$NEW_PORT" ]; then
+    NEW_PORT=$(grep "^  port:" "$ACTIVE_CONFIG" | head -1 | awk '{print $2}' | tr -d '"''')
+fi
+
+# 如果还是失败，尝试方法3: sed
+if [ -z "$NEW_PORT" ]; then
+    NEW_PORT=$(sed -n '/^server:/,/^[a-z]/p' "$ACTIVE_CONFIG" | grep "port:" | sed 's/.*port: *//;s/["'']//g' | head -1)
+fi
+
 print_info "读取到的端口: '$NEW_PORT' (期望: $CONFIG_PORT)"
 
 if [ -n "$NEW_PORT" ] && [ "$NEW_PORT" = "$CONFIG_PORT" ]; then
@@ -404,7 +410,7 @@ After=network.target
 Type=simple
 User=root
 WorkingDirectory=$INSTALL_DIR/backend
-ExecStart=$INSTALL_DIR/backend/uniproxy-panel -config $INSTALL_DIR/config.yaml
+ExecStart=$INSTALL_DIR/backend/uniproxy-panel -config $INSTALL_DIR/backend/config.yaml
 Restart=on-failure
 RestartSec=5s
 
