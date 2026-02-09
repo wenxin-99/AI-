@@ -16,6 +16,8 @@ import NodeManage from "./pages/NodeManage";
 import BBROptimize from "./pages/BBROptimize";
 import Certificates from "./pages/Certificates";
 import Settings from "./pages/Settings";
+import MonitorDashboard from "./pages/MonitorDashboard";
+import NodeMonitor from "./pages/NodeMonitor";
 
 
 function Router() {
@@ -33,6 +35,8 @@ function Router() {
       <Route path={"/bbr"} component={BBROptimize} />
       <Route path={"/certificates"} component={Certificates} />
       <Route path={"/settings"} component={Settings} />
+      <Route path={"/monitor"} component={MonitorDashboard} />
+      <Route path={"/nodes/:id/monitor"} component={NodeMonitor} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />
