@@ -41,12 +41,12 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	nodeController := controllers.NewNodeController(db)
 	bbrController := controllers.NewBBRController()
 	certController := controllers.NewCertificateController(db)
-	
+
 	// 初始化监控服务
 	monitorService := services.NewNodeMonitorService(db)
 	monitorService.Start() // 启动监控服务
 	monitorController := controllers.NewNodeMonitorController(db, monitorService)
-	
+
 	// 初始化 WebSocket 控制器
 	websocketController := controllers.NewWebSocketController(db)
 
@@ -108,13 +108,13 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 				xray.PUT("/clients/:id", xrayController.UpdateClient)
 				xray.DELETE("/clients/:id", xrayController.DeleteClient)
 
-					// Xray控制
-					xray.POST("/restart", xrayController.Restart)
-					xray.GET("/status", xrayController.GetStatus)
-					// xray.POST("/generate-keypair", xrayController.GenerateKeypair) // TODO: Implement
-					
-					// 测试连接
-					// xray.POST("/inbounds/:id/test", xrayController.TestInbound) // TODO: Implement
+				// Xray控制
+				xray.POST("/restart", xrayController.Restart)
+				xray.GET("/status", xrayController.GetStatus)
+				// xray.POST("/generate-keypair", xrayController.GenerateKeypair) // TODO: Implement
+
+				// 测试连接
+				// xray.POST("/inbounds/:id/test", xrayController.TestInbound) // TODO: Implement
 			}
 
 			// Gost管理
@@ -135,12 +135,12 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 				gost.DELETE("/forwards/:id", gostController.DeleteForward)
 				// Toggle is handled via PUT with enable field
 
-					// Gost控制
-					gost.POST("/restart", gostController.Restart)
-					gost.GET("/status", gostController.GetStatus)
-					
-					// 测试连接
-					// gost.POST("/forwards/:id/test", gostController.TestForward) // TODO: Implement
+				// Gost控制
+				gost.POST("/restart", gostController.Restart)
+				gost.GET("/status", gostController.GetStatus)
+
+				// 测试连接
+				// gost.POST("/forwards/:id/test", gostController.TestForward) // TODO: Implement
 			}
 
 			// 系统管理(仅管理员)
@@ -189,7 +189,7 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 				node.GET("/:id/health", nodeController.CheckNodeHealth)
 				node.POST("/batch-sync", nodeController.BatchSyncNodes)
 				node.GET("/generate-token", nodeController.GenerateAPIToken)
-				
+
 				// 节点监控
 				node.GET("/:id/monitor/status", monitorController.GetNodeStatus)
 				node.GET("/:id/monitor/history", monitorController.GetNodeHistory)
@@ -197,18 +197,18 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 				node.GET("/:id/monitor/config", monitorController.GetHealthCheckConfig)
 				node.PUT("/:id/monitor/config", monitorController.UpdateHealthCheckConfig)
 			}
-			
+
 			// 监控统计
 			monitor := authenticated.Group("/monitor")
 			{
 				monitor.GET("/stats", monitorController.GetMonitorStats)
-				
+
 				// 告警规则管理
 				monitor.GET("/alerts/rules", monitorController.ListAlertRules)
 				monitor.POST("/alerts/rules", monitorController.CreateAlertRule)
 				monitor.PUT("/alerts/rules/:id", monitorController.UpdateAlertRule)
 				monitor.DELETE("/alerts/rules/:id", monitorController.DeleteAlertRule)
-				
+
 				// 告警日志
 				monitor.GET("/alerts/logs", monitorController.ListAlertLogs)
 				monitor.POST("/alerts/logs/:id/resolve", monitorController.ResolveAlert)
@@ -235,7 +235,7 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 				certs.DELETE("/:id", certController.DeleteCertificate)
 				certs.GET("/expiring", certController.CheckExpiring)
 			}
-			
+
 			// WebSocket 路由(需要 JWT 认证)
 			ws := authenticated.Group("/ws")
 			{
@@ -252,8 +252,9 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 		{
 			nodeAPI.POST("/heartbeat", nodeController.Heartbeat)
 			nodeAPI.GET("/config", nodeController.GetNodeConfig)
-			nodeAPI.POST("/register", nodeController.RegisterNode)
 		}
+		// 节点注册接口（无需认证，因为首次注册时节点记录还不存在）
+		v1.POST("/node/register", nodeController.RegisterNode)
 		// 节点安装脚本公开接口(供curl直接执行)
 		// 使用 /node-script/install 避免与 authenticated /node 路由组冲突
 		v1.GET("/node-script/install", nodeController.GetInstallScriptRaw)
