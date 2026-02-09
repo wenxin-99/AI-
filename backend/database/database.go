@@ -92,6 +92,10 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.Setting{},
 		&model.Subscription{},
 		&model.Certificate{},
+		&model.NodeMonitor{},
+		&model.AlertRule{},
+		&model.AlertLog{},
+		&model.NodeHealthCheck{},
 	)
 
 	if err != nil {

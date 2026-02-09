@@ -5,6 +5,7 @@ import (
 	"github.com/uniproxy/panel/config"
 	"github.com/uniproxy/panel/controllers"
 	"github.com/uniproxy/panel/middleware"
+	"github.com/uniproxy/panel/services"
 	"gorm.io/gorm"
 )
 
@@ -40,6 +41,11 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	nodeController := controllers.NewNodeController(db)
 	bbrController := controllers.NewBBRController()
 	certController := controllers.NewCertificateController(db)
+	
+	// 初始化监控服务
+	monitorService := services.NewNodeMonitorService(db)
+	monitorService.Start() // 启动监控服务
+	monitorController := controllers.NewNodeMonitorController(db, monitorService)
 
 	// API v1 路由组
 	v1 := router.Group(cfg.Server.BasePath + "api/v1")
@@ -180,6 +186,29 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 				node.GET("/:id/health", nodeController.CheckNodeHealth)
 				node.POST("/batch-sync", nodeController.BatchSyncNodes)
 				node.GET("/generate-token", nodeController.GenerateAPIToken)
+				
+				// 节点监控
+				node.GET("/:id/monitor/status", monitorController.GetNodeStatus)
+				node.GET("/:id/monitor/history", monitorController.GetNodeHistory)
+				node.POST("/:id/monitor/check", monitorController.CheckNodeNow)
+				node.GET("/:id/monitor/config", monitorController.GetHealthCheckConfig)
+				node.PUT("/:id/monitor/config", monitorController.UpdateHealthCheckConfig)
+			}
+			
+			// 监控统计
+			monitor := authenticated.Group("/monitor")
+			{
+				monitor.GET("/stats", monitorController.GetMonitorStats)
+				
+				// 告警规则管理
+				monitor.GET("/alerts/rules", monitorController.ListAlertRules)
+				monitor.POST("/alerts/rules", monitorController.CreateAlertRule)
+				monitor.PUT("/alerts/rules/:id", monitorController.UpdateAlertRule)
+				monitor.DELETE("/alerts/rules/:id", monitorController.DeleteAlertRule)
+				
+				// 告警日志
+				monitor.GET("/alerts/logs", monitorController.ListAlertLogs)
+				monitor.POST("/alerts/logs/:id/resolve", monitorController.ResolveAlert)
 			}
 
 			// BBR优化管理
