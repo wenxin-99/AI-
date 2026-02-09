@@ -288,15 +288,36 @@ print_info "开始智能端口分配..."
 TARGET_PORTS=(8080 8081 8082 8083 8084 8085 9000 9001)
 CONFIG_PORT=""
 
-# 检查端口是否被占用
+# 检查端口是否被占用，如果被 uniproxy-panel 占用则停止服务
 check_port_available() {
     local port=$1
+    local process_info=""
+    
     if command -v ss &> /dev/null; then
-        if ss -tlnp 2>/dev/null | grep -q ":$port "; then
-            return 1
-        fi
+        process_info=$(ss -tlnp 2>/dev/null | grep ":$port ")
     elif command -v netstat &> /dev/null; then
-        if netstat -tlnp 2>/dev/null | grep -q ":$port "; then
+        process_info=$(netstat -tlnp 2>/dev/null | grep ":$port ")
+    fi
+    
+    if [ -n "$process_info" ]; then
+        # 检查是否是 uniproxy-panel 进程
+        if echo "$process_info" | grep -q "uniproxy-panel"; then
+            print_info "端口 $port 被旧的 uniproxy-panel 进程占用，正在停止..."
+            systemctl stop uniproxy-panel 2>/dev/null || true
+            sleep 2
+            # 再次检查端口
+            if command -v ss &> /dev/null; then
+                if ss -tlnp 2>/dev/null | grep -q ":$port "; then
+                    return 1
+                fi
+            elif command -v netstat &> /dev/null; then
+                if netstat -tlnp 2>/dev/null | grep -q ":$port "; then
+                    return 1
+                fi
+            fi
+            print_success "旧服务已停止，端口 $port 现已可用"
+            return 0
+        else
             return 1
         fi
     fi
@@ -310,7 +331,7 @@ for port in "${TARGET_PORTS[@]}"; do
         print_success "选择可用端口: $CONFIG_PORT"
         break
     else
-        print_warning "端口 $port 已被占用"
+        print_warning "端口 $port 已被其他进程占用"
     fi
 done
 
