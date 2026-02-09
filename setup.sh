@@ -147,36 +147,69 @@ else
     exit 1
 fi
 
-# 检测配置文件中的端口
-CONFIG_PORT=$(grep -E "^  port:" "$ACTIVE_CONFIG" | awk '{print $2}' | head -1)
-if [ -z "$CONFIG_PORT" ]; then
-    CONFIG_PORT="8080"
-    print_warning "未检测到端口配置，使用默认端口 8080"
-else
-    print_info "检测到配置端口: $CONFIG_PORT"
+# 智能端口分配策略：优先使用 8080，如果被占用则尝试备用端口
+print_info "开始智能端口分配..."
+
+# 检测配置文件中的原始端口
+ORIGINAL_PORT=$(grep -E "^  port:" "$ACTIVE_CONFIG" | awk '{print $2}' | head -1)
+if [ -n "$ORIGINAL_PORT" ]; then
+    print_info "配置文件原始端口: $ORIGINAL_PORT"
 fi
 
-# 检查端口是否被占用
-if command -v ss &> /dev/null; then
-    if ss -tlnp | grep -q ":$CONFIG_PORT "; then
-        print_warning "端口 $CONFIG_PORT 已被占用"
-        # 尝试使用备用端口
-        for ALT_PORT in 8080 8081 8082 8083 8084 8085; do
-            if ! ss -tlnp | grep -q ":$ALT_PORT "; then
-                CONFIG_PORT=$ALT_PORT
-                print_info "使用备用端口: $CONFIG_PORT"
-                break
-            fi
-        done
+# 目标端口列表（按优先级）
+TARGET_PORTS=(8080 8081 8082 8083 8084 8085 9000 9001)
+CONFIG_PORT=""
+
+# 检查端口是否被占用的函数
+check_port_available() {
+    local port=$1
+    if command -v ss &> /dev/null; then
+        if ss -tlnp 2>/dev/null | grep -q ":$port "; then
+            return 1  # 端口被占用
+        fi
+    elif command -v netstat &> /dev/null; then
+        if netstat -tlnp 2>/dev/null | grep -q ":$port "; then
+            return 1  # 端口被占用
+        fi
     fi
+    return 0  # 端口可用
+}
+
+# 遍历目标端口列表，找到第一个可用端口
+for port in "${TARGET_PORTS[@]}"; do
+    if check_port_available $port; then
+        CONFIG_PORT=$port
+        print_success "选择可用端口: $CONFIG_PORT"
+        break
+    else
+        print_warning "端口 $port 已被占用，尝试下一个..."
+    fi
+done
+
+# 如果所有端口都被占用，使用默认端口并提示用户
+if [ -z "$CONFIG_PORT" ]; then
+    CONFIG_PORT="8080"
+    print_error "所有预设端口都被占用，强制使用 8080（可能导致冲突）"
+    print_warning "请手动停止占用 8080 端口的服务，或修改配置文件使用其他端口"
 fi
 
 # 备份配置文件
 cp "$ACTIVE_CONFIG" "${ACTIVE_CONFIG}.backup.$(date +%Y%m%d_%H%M%S)"
 
-# 修改端口配置
-sed -i "s/port: *[0-9]\+/port: $CONFIG_PORT/g" "$ACTIVE_CONFIG"
-sed -i "s/listen: *[0-9]\+/listen: $CONFIG_PORT/g" "$ACTIVE_CONFIG"
+# 修改端口配置（使用更精确的匹配）
+print_info "更新配置文件端口为: $CONFIG_PORT"
+
+# 只替换 server 部分的 port 配置
+sed -i "/^server:/,/^[a-z]/ s/^  port: *[0-9]\+/  port: $CONFIG_PORT/" "$ACTIVE_CONFIG"
+
+# 验证修改是否成功
+NEW_PORT=$(grep -E "^  port:" "$ACTIVE_CONFIG" | awk '{print $2}' | head -1)
+if [ "$NEW_PORT" = "$CONFIG_PORT" ]; then
+    print_success "端口配置更新成功: $NEW_PORT"
+else
+    print_error "端口配置更新失败，当前值: $NEW_PORT"
+    exit 1
+fi
 
 # 保存端口到环境变量供后续使用
 export BACKEND_PORT=$CONFIG_PORT
@@ -287,15 +320,42 @@ fi
 print_step "6/6" "启动服务..."
 
 # 重启后端服务
+print_info "重启后端服务..."
 systemctl restart uniproxy-panel
 sleep 3
 
 # 检查后端服务
 if systemctl is-active --quiet uniproxy-panel; then
     print_success "后端服务运行正常"
+    
+    # 验证端口监听
+    print_info "验证端口监听状态..."
+    sleep 2
+    
+    if command -v ss &> /dev/null; then
+        LISTENING_PORT=$(ss -tlnp 2>/dev/null | grep uniproxy-panel | grep -oP ':\K[0-9]+' | head -1)
+        if [ -n "$LISTENING_PORT" ]; then
+            print_success "后端实际监听端口: $LISTENING_PORT"
+            if [ "$LISTENING_PORT" != "$BACKEND_PORT" ]; then
+                print_error "警告：实际监听端口 ($LISTENING_PORT) 与配置端口 ($BACKEND_PORT) 不一致！"
+                print_warning "请检查后端日志: journalctl -u uniproxy-panel -n 50"
+            fi
+        else
+            print_warning "无法检测到后端监听端口"
+        fi
+    fi
+    
+    # 测试后端 API
+    print_info "测试后端 API 响应..."
+    if curl -s -f -m 5 "http://127.0.0.1:$BACKEND_PORT/api/v1/system/info" > /dev/null 2>&1; then
+        print_success "后端 API 响应正常"
+    else
+        print_warning "后端 API 暂无响应，可能需要等待服务完全启动"
+    fi
 else
     print_error "后端服务启动失败"
-    journalctl -u uniproxy-panel -n 20 --no-pager
+    print_info "查看最近 50 条日志："
+    journalctl -u uniproxy-panel -n 50 --no-pager
     exit 1
 fi
 
@@ -305,6 +365,15 @@ systemctl restart nginx
 # 检查 Nginx 服务
 if systemctl is-active --quiet nginx; then
     print_success "Nginx 服务运行正常"
+    
+    # 测试 Nginx 代理
+    print_info "测试 Nginx 代理功能..."
+    if curl -s -f -m 5 "http://localhost/api/v1/system/info" > /dev/null 2>&1; then
+        print_success "Nginx 代理工作正常"
+    else
+        print_warning "Nginx 代理暂无响应，请检查配置"
+        print_info "Nginx 配置的后端地址: http://127.0.0.1:$BACKEND_PORT"
+    fi
 else
     print_error "Nginx 服务启动失败"
     exit 1
@@ -334,7 +403,8 @@ echo -e "  查看 Nginx 状态: ${YELLOW}systemctl status nginx${NC}"
 echo -e "  查看 Nginx 日志: ${YELLOW}tail -f /var/log/nginx/error.log${NC}"
 echo ""
 echo -e "${BLUE}健康检查：${NC}"
-echo -e "  后端健康检查: ${YELLOW}curl http://127.0.0.1:8080/api/health${NC}"
-echo -e "  API 代理测试: ${YELLOW}curl http://127.0.0.1/api/health${NC}"
+echo -e "  后端 API 测试: ${YELLOW}curl http://127.0.0.1:$BACKEND_PORT/api/v1/system/info${NC}"
+echo -e "  Nginx 代理测试: ${YELLOW}curl http://localhost/api/v1/system/info${NC}"
+echo -e "  端口配置检查: ${YELLOW}bash /root/AI-/fix-port-smart.sh${NC}"
 echo ""
 print_header "请刷新浏览器页面开始使用！"
