@@ -23,10 +23,14 @@ export default function Dashboard() {
 
   // WebSocket 实时流量
   const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${wsProtocol}//${window.location.host}/api/v1/ws/realtime-traffic`;
+  
+  // Get JWT token from localStorage
   const token = localStorage.getItem('token');
-  const wsUrl = `${wsProtocol}//${window.location.host}/api/v1/ws/realtime-traffic${token ? `?token=${token}` : ''}`;
+  
   const { isConnected, lastMessage } = useWebSocket({
     url: wsUrl,
+    token: token || undefined,
     onMessage: (data) => {
       setRealtimeStats(data);
     },

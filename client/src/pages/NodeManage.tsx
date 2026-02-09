@@ -593,7 +593,8 @@ export default function NodeManage() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-7 text-xs text-cyan-400 hover:bg-cyan-500/20"
+                  className="h-7 text-xs text-cyan-400 hover:bg-cyan-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={loadingScript || !installOneLiner}
                   onClick={async () => {
                     if (!installOneLiner) {
                       toast.error('安装命令未加载');
@@ -674,8 +675,9 @@ export default function NodeManage() {
                   toast.error('复制失败');
                 }
               }}
+              disabled={loadingScript || !installOneLiner}
               variant="outline"
-              className="flex-1 border-cyan-400/30 hover:bg-cyan-500/20 text-cyan-400"
+              className="flex-1 border-cyan-400/30 hover:bg-cyan-500/20 text-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Copy className="w-4 h-4 mr-2" />
               复制安装命令

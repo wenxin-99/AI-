@@ -143,9 +143,18 @@ export default function Settings() {
 
   const handleSaveSettings = async () => {
     try {
-      await api.put('/api/v1/system/settings', systemSettings);
-      toast.success('系统设置已保存，部分设置需要重启服务后生效');
-      setNeedsRestart(true);
+      const response: any = await api.put('/api/v1/system/settings', systemSettings);
+      const data = response?.data || response;
+      
+      // 根据后端返回的信息显示不同的提示
+      if (data?.message) {
+        toast.success(data.message);
+      } else {
+        toast.success('系统设置已保存');
+      }
+      
+      // 设置是否需要重启
+      setNeedsRestart(data?.data?.needs_restart || false);
     } catch (error) {
       toast.error(`保存失败: ${error instanceof Error ? error.message : '未知错误'}`);
     }

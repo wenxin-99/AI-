@@ -8,6 +8,7 @@ interface WebSocketOptions {
   onClose?: () => void;
   reconnect?: boolean;
   reconnectInterval?: number;
+  token?: string; // JWT token for authentication
 }
 
 export function useWebSocket(options: WebSocketOptions) {
@@ -28,7 +29,14 @@ export function useWebSocket(options: WebSocketOptions) {
 
   const connect = () => {
     try {
-      const ws = new WebSocket(url);
+      // Add JWT token to URL if provided
+      let wsUrl = url;
+      if (options.token) {
+        const separator = url.includes('?') ? '&' : '?';
+        wsUrl = `${url}${separator}token=${options.token}`;
+      }
+      
+      const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
         console.log('WebSocket 已连接');

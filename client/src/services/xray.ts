@@ -134,30 +134,30 @@ export const xrayService = {
   },
 
   // 创建入站 - 使用超时保护
-  createInbound: async (data: CreateInboundRequest): Promise<{ timedOut?: boolean }> => {
+  createInbound: async (data: CreateInboundRequest): Promise<{ success: boolean; timedOut?: boolean }> => {
     const result = await executeWriteOperation(
       () => api.post("/api/v1/xray/inbounds", data),
       15000
     );
-    return { timedOut: result.timedOut };
+    return { success: result.success, timedOut: result.timedOut };
   },
 
   // 更新入站 - 必须发送所有必填字段(remark, port, protocol)
-  updateInbound: async (id: number, data: CreateInboundRequest): Promise<{ timedOut?: boolean }> => {
+  updateInbound: async (id: number, data: CreateInboundRequest): Promise<{ success: boolean; timedOut?: boolean }> => {
     const result = await executeWriteOperation(
       () => api.put(`/api/v1/xray/inbounds/${id}`, data),
       15000
     );
-    return { timedOut: result.timedOut };
+    return { success: result.success, timedOut: result.timedOut };
   },
 
   // 删除入站 - 使用超时保护
-  deleteInbound: async (id: number): Promise<{ timedOut?: boolean }> => {
+  deleteInbound: async (id: number): Promise<{ success: boolean; timedOut?: boolean }> => {
     const result = await executeWriteOperation(
       () => api.delete(`/api/v1/xray/inbounds/${id}`),
       15000
     );
-    return { timedOut: result.timedOut };
+    return { success: result.success, timedOut: result.timedOut };
   },
 
   // 获取客户端列表

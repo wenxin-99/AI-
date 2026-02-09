@@ -184,5 +184,15 @@ export default defineConfig({
       strict: true,
       deny: ["**/.*"],
     },
+    proxy: {
+      // 将 /api 请求代理到后端服务器
+      // 开发环境：使用环境变量 VITE_API_PROXY_TARGET 或默认到 http://localhost:8080
+      // 生产环境：Nginx 会直接处理 /api 请求，不需要代理
+      '/api': {
+        target: process.env.VITE_API_PROXY_TARGET || 'http://localhost:8080',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
   },
 });

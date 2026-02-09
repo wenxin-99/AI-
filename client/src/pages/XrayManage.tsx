@@ -450,14 +450,20 @@ export default function XrayManage() {
         stream_settings: streamSettingsJson,
         sniffing: sniffingJson,
       });
-      if (result.timedOut) {
-        toast.success("入站创建成功（后端正在重启Xray服务）");
+      
+      if (result.success) {
+        if (result.timedOut) {
+          toast.success("入站创建成功（后端正在重启Xray服务）");
+        } else {
+          toast.success("入站创建成功");
+        }
+        setCreateDialogOpen(false);
+        resetForm();
+        setTimeout(() => fetchInbounds(), 1000);
       } else {
-        toast.success("入站创建成功");
+        toast.error("创建入站失败");
+        setTimeout(() => fetchInbounds(), 1000);
       }
-      setCreateDialogOpen(false);
-      resetForm();
-      setTimeout(() => fetchInbounds(), 1000);
     } catch (error) {
       console.error("Failed to create inbound:", error);
       toast.error("创建入站失败");
@@ -514,7 +520,15 @@ export default function XrayManage() {
 
   // ============ 编辑入站 ============
   const handleEdit = async () => {
-    if (!selectedInbound) return;
+    console.log('[DEBUG] handleEdit called');
+    console.log('[DEBUG] selectedInbound:', selectedInbound);
+    console.log('[DEBUG] formData:', formData);
+    console.log('[DEBUG] selectedNodeId:', selectedNodeId);
+    
+    if (!selectedInbound) {
+      console.log('[DEBUG] No selectedInbound, returning');
+      return;
+    }
 
     if (!formData.remark || !formData.port) {
       toast.error("请填写完整信息");
@@ -538,24 +552,41 @@ export default function XrayManage() {
         metadataOnly: false,
       });
 
+      // 验证 node_id
+      let nodeId: number | undefined = undefined;
+      if (selectedNodeId) {
+        const parsedNodeId = parseInt(selectedNodeId);
+        if (isNaN(parsedNodeId)) {
+          toast.error("节点 ID 无效");
+          return;
+        }
+        nodeId = parsedNodeId;
+      }
+
       const result = await xrayService.updateInbound(selectedInbound.id, {
         remark: formData.remark,
         port: parseInt(formData.port),
         protocol: formData.protocol,
         listen: formData.listen,
-        node_id: selectedNodeId ? parseInt(selectedNodeId) : undefined,
+        node_id: nodeId,
         settings: settingsJson,
         stream_settings: streamSettingsJson,
         sniffing: sniffingJson,
       });
-      if (result.timedOut) {
-        toast.success("入站更新成功（后端正在重启Xray服务）");
+      
+      if (result.success) {
+        if (result.timedOut) {
+          toast.success("入站更新成功（后端正在重启Xray服务）");
+        } else {
+          toast.success("入站更新成功");
+        }
+        setEditDialogOpen(false);
+        resetForm();
+        setTimeout(() => fetchInbounds(), 1000);
       } else {
-        toast.success("入站更新成功");
+        toast.error("更新入站失败");
+        setTimeout(() => fetchInbounds(), 1000);
       }
-      setEditDialogOpen(false);
-      resetForm();
-      setTimeout(() => fetchInbounds(), 1000);
     } catch (error) {
       console.error("Failed to update inbound:", error);
       toast.error("更新入站失败");
@@ -568,12 +599,18 @@ export default function XrayManage() {
 
     try {
       const result = await xrayService.deleteInbound(id);
-      if (result.timedOut) {
-        toast.success("入站删除成功（后端正在重启Xray服务）");
+      
+      if (result.success) {
+        if (result.timedOut) {
+          toast.success("入站删除成功（后端正在重启Xray服务）");
+        } else {
+          toast.success("入站删除成功");
+        }
+        setTimeout(() => fetchInbounds(), 1000);
       } else {
-        toast.success("入站删除成功");
+        toast.error("删除入站失败");
+        setTimeout(() => fetchInbounds(), 1000);
       }
-      setTimeout(() => fetchInbounds(), 1000);
     } catch (error) {
       console.error("Failed to delete inbound:", error);
       toast.error("删除入站失败");
@@ -597,12 +634,17 @@ export default function XrayManage() {
         sniffing: sniffingStr,
       });
 
-      if (result.timedOut) {
-        toast.success("入站配置已更新（后端正在重启Xray服务）");
+      if (result.success) {
+        if (result.timedOut) {
+          toast.success("入站配置已更新（后端正在重启Xray服务）");
+        } else {
+          toast.success("入站配置已更新");
+        }
+        setTimeout(() => fetchInbounds(), 1000);
       } else {
-        toast.success("入站配置已更新");
+        toast.error("操作失败");
+        setTimeout(() => fetchInbounds(), 1000);
       }
-      setTimeout(() => fetchInbounds(), 1000);
     } catch (error) {
       console.error("Failed to toggle inbound:", error);
       toast.error("操作失败");
