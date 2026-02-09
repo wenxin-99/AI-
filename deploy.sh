@@ -91,10 +91,10 @@ cd backend
 # 自动检测 main.go 位置
 if [ -f "cmd/main.go" ]; then
     echo -e "${GREEN}检测到 cmd/main.go，使用标准结构构建${NC}"
-    /usr/local/go/bin/go build -o uniproxy-panel cmd/main.go
+    /usr/local/go/bin/go build -o uniproxy-panel ./cmd/main.go
 elif [ -f "main.go" ]; then
     echo -e "${GREEN}检测到 main.go，使用简化结构构建${NC}"
-    /usr/local/go/bin/go build -o uniproxy-panel main.go
+    /usr/local/go/bin/go build -o uniproxy-panel ./main.go
 else
     echo -e "${RED}错误：找不到 main.go 文件${NC}"
     echo -e "${RED}请检查后端目录结构${NC}"

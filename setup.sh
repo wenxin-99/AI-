@@ -75,10 +75,10 @@ export GOPROXY=https://goproxy.cn,direct
 
 # 检测 main.go 位置
 if [ -f "cmd/main.go" ]; then
-    MAIN_GO_PATH="cmd/main.go"
+    MAIN_GO_PATH="./cmd/main.go"
     print_success "检测到 cmd/main.go"
 elif [ -f "main.go" ]; then
-    MAIN_GO_PATH="main.go"
+    MAIN_GO_PATH="./main.go"
     print_success "检测到 main.go"
 else
     print_error "找不到 main.go 文件"
@@ -86,17 +86,19 @@ else
 fi
 
 # 下载依赖
+print_info "下载 Go 依赖..."
 /usr/local/go/bin/go mod download
 
 # 清理旧文件
 rm -f uniproxy-panel uniproxy
 
-# 编译
+# 编译（使用相对路径）
+print_info "编译后端程序..."
 if /usr/local/go/bin/go build -o uniproxy-panel $MAIN_GO_PATH; then
-    print_success "后端编译成功"
-    ls -lh uniproxy-panel
+    print_success "后端编译成功 ($(ls -lh uniproxy-panel | awk '{print $5}'))"
 else
     print_error "后端编译失败"
+    print_error "请检查 Go 版本和依赖是否正确安装"
     exit 1
 fi
 

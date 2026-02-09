@@ -441,7 +441,7 @@ build_backend() {
     fi
     
     # 使用正确的构建命令
-    /usr/local/go/bin/go build -o uniproxy cmd/main.go || error_exit "后端编译失败"
+    /usr/local/go/bin/go build -o uniproxy ./cmd/main.go || error_exit "后端编译失败"
     
     log_info "后端构建完成"
 }

@@ -95,9 +95,9 @@ echo -e "${YELLOW}使用文件: $MAIN_GO_PATH${NC}"
 # 尝试多种编译方式
 COMPILED=false
 
-# 方法1：使用完整路径
+# 方法1：使用完整路径（修正：添加 ./ 前缀）
 echo -e "${YELLOW}尝试方法1: 使用完整 Go 路径${NC}"
-if /usr/local/go/bin/go build -o uniproxy-panel $MAIN_GO_PATH 2>/dev/null; then
+if /usr/local/go/bin/go build -o uniproxy-panel ./$MAIN_GO_PATH 2>/dev/null; then
     COMPILED=true
     echo -e "${GREEN}✓ 方法1 成功${NC}"
 fi
@@ -105,7 +105,7 @@ fi
 # 方法2：使用环境变量中的 go
 if [ "$COMPILED" = false ]; then
     echo -e "${YELLOW}尝试方法2: 使用环境变量 go${NC}"
-    if go build -o uniproxy-panel $MAIN_GO_PATH 2>/dev/null; then
+    if go build -o uniproxy-panel ./$MAIN_GO_PATH 2>/dev/null; then
         COMPILED=true
         echo -e "${GREEN}✓ 方法2 成功${NC}"
     fi
@@ -115,7 +115,7 @@ fi
 if [ "$COMPILED" = false ] && [ -f "cmd/main.go" ]; then
     echo -e "${YELLOW}尝试方法3: 在 cmd 目录中编译${NC}"
     cd cmd
-    if /usr/local/go/bin/go build -o ../uniproxy-panel main.go 2>/dev/null; then
+    if /usr/local/go/bin/go build -o ../uniproxy-panel ./main.go 2>/dev/null; then
         cd ..
         COMPILED=true
         echo -e "${GREEN}✓ 方法3 成功${NC}"
@@ -128,7 +128,7 @@ fi
 if [ "$COMPILED" = false ]; then
     echo -e "${RED}所有编译方法都失败了${NC}"
     echo -e "${YELLOW}尝试显示详细错误信息：${NC}"
-    /usr/local/go/bin/go build -v -o uniproxy-panel $MAIN_GO_PATH
+    /usr/local/go/bin/go build -v -o uniproxy-panel ./$MAIN_GO_PATH
     exit 1
 fi
 
