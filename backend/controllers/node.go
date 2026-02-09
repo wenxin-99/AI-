@@ -78,7 +78,7 @@ func (nc *NodeController) Heartbeat(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	// 更新心跳时间和流量
 	now := time.Now()
 	node.LastHeartbeat = &now
@@ -888,17 +888,32 @@ func generateInstallScript(panelURL, apiToken, nodeName, nodeType string) string
 	// 注册节点
 	sb.WriteString("# ===== 注册节点到面板 =====\n")
 	sb.WriteString("info \"注册节点到面板...\"\n")
-	sb.WriteString("REGISTER_RESULT=$(curl -sfL -X POST \"${PANEL_URL}/api/v1/node/register\" \\\n")
+	sb.WriteString("info \"面板地址: ${PANEL_URL}\"\n")
+	sb.WriteString("info \"API Token: ${API_TOKEN:0:8}...\"\n")
+	sb.WriteString("info \"节点名称: ${NODE_NAME}\"\n")
+	sb.WriteString("info \"公网 IP: ${PUBLIC_IP}\"\n\n")
+
+	sb.WriteString("# 执行注册请求，显示详细错误\n")
+	sb.WriteString("HTTP_CODE=$(curl -w '%{http_code}' -o /tmp/register_response.json -X POST \"${PANEL_URL}/api/v1/node/register\" \\\n")
 	sb.WriteString("  -H \"X-API-Token: ${API_TOKEN}\" \\\n")
 	sb.WriteString("  -H \"Content-Type: application/json\" \\\n")
-	sb.WriteString("  -d \"{\\\"name\\\": \\\"${NODE_NAME}\\\", \\\"host\\\": \\\"${PUBLIC_IP}\\\", \\\"port\\\": ${NODE_PORT}, \\\"type\\\": \\\"${NODE_TYPE}\\\", \\\"api_token\\\": \\\"${API_TOKEN}\\\"}\")\n\n")
+	sb.WriteString("  -d \"{\\\"name\\\": \\\"${NODE_NAME}\\\", \\\"host\\\": \\\"${PUBLIC_IP}\\\", \\\"port\\\": ${NODE_PORT}, \\\"type\\\": \\\"${NODE_TYPE}\\\", \\\"api_token\\\": \\\"${API_TOKEN}\\\"}\" 2>&1)\n\n")
 
-	sb.WriteString("if echo \"$REGISTER_RESULT\" | jq -e '.success' &>/dev/null; then\n")
+	sb.WriteString("REGISTER_RESULT=$(cat /tmp/register_response.json 2>/dev/null || echo '{\"success\": false, \"message\": \"\u8bf7\u6c42\u5931\u8d25\"}')\n")
+	sb.WriteString("info \"HTTP 状态码: $HTTP_CODE\"\n")
+	sb.WriteString("info \"响应内容: $REGISTER_RESULT\"\n\n")
+
+	sb.WriteString("if [[ \"$HTTP_CODE\" == \"200\" ]] && echo \"$REGISTER_RESULT\" | jq -e '.success' &>/dev/null; then\n")
 	sb.WriteString("  success \"节点注册成功!\"\n")
+	sb.WriteString("  NODE_ID=$(echo \"$REGISTER_RESULT\" | jq -r '.data.id // empty')\n")
+	sb.WriteString("  [[ -n \"$NODE_ID\" ]] && info \"节点 ID: $NODE_ID\"\n")
 	sb.WriteString("else\n")
-	sb.WriteString("  warn \"节点注册失败，请手动在面板添加\"\n")
-	sb.WriteString("  echo \"$REGISTER_RESULT\"\n")
-	sb.WriteString("fi\n\n")
+	sb.WriteString("  warn \"节点注册失败（HTTP $HTTP_CODE）\"\n")
+	sb.WriteString("  ERROR_MSG=$(echo \"$REGISTER_RESULT\" | jq -r '.message // \"\u672a\u77e5\u9519\u8bef\"')\n")
+	sb.WriteString("  warn \"错误信息: $ERROR_MSG\"\n")
+	sb.WriteString("  warn \"请检查 API Token 是否正确，或手动在面板添加节点\"\n")
+	sb.WriteString("fi\n")
+	sb.WriteString("rm -f /tmp/register_response.json\n\n")
 
 	// 完成信息
 	sb.WriteString("# ===== 完成 =====\n")
