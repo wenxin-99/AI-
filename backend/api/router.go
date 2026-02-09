@@ -46,6 +46,9 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	monitorService := services.NewNodeMonitorService(db)
 	monitorService.Start() // 启动监控服务
 	monitorController := controllers.NewNodeMonitorController(db, monitorService)
+	
+	// 初始化 WebSocket 控制器
+	websocketController := controllers.NewWebSocketController(db)
 
 	// API v1 路由组
 	v1 := router.Group(cfg.Server.BasePath + "api/v1")
@@ -231,6 +234,14 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 				certs.POST("/generate", certController.GenerateSelfSignedCert)
 				certs.DELETE("/:id", certController.DeleteCertificate)
 				certs.GET("/expiring", certController.CheckExpiring)
+			}
+			
+			// WebSocket 路由(需要 JWT 认证)
+			ws := authenticated.Group("/ws")
+			{
+				ws.GET("/realtime-traffic", websocketController.HandleRealtimeTraffic)
+				ws.GET("/traffic-stream", websocketController.HandleTrafficStream)
+				ws.GET("/system-status", websocketController.HandleSystemStatus)
 			}
 		}
 
