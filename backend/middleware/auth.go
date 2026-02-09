@@ -110,7 +110,7 @@ func GenerateToken(userID uint, username, role string, cfg *config.Config) (stri
 }
 
 // NodeAPIAuth 节点API认证中间件（使用API Token）
-func NodeAPIAuth(db interface{}) gin.HandlerFunc {
+func NodeAPIAuth(database interface{}) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// 从Header获取API Token
 		apiToken := c.GetHeader("X-API-Token")
@@ -128,9 +128,42 @@ func NodeAPIAuth(db interface{}) gin.HandlerFunc {
 			return
 		}
 
-		// TODO: 验证API Token并获取节点信息
-		// 这里需要从数据库查询节点信息
-		// 暂时允许通过，待实现完整的节点认证逻辑
+		// 验证API Token并获取节点信息
+		type Node struct {
+			ID            uint       `gorm:"primarykey" json:"id"`
+			Name          string     `json:"name"`
+			Host          string     `json:"host"`
+			Port          int        `json:"port"`
+			APIToken      string     `json:"api_token"`
+			Type          string     `json:"type"`
+			Status        string     `json:"status"`
+			CPUUsage      float64    `json:"cpu_usage"`
+			MemoryUsage   float64    `json:"memory_usage"`
+			TrafficUp     int64      `json:"traffic_up"`
+			TrafficDown   int64      `json:"traffic_down"`
+			LastHeartbeat *time.Time `json:"last_heartbeat"`
+		}
+
+		var node Node
+		// 使用 GORM 查询节点
+		type DB interface {
+			Where(query interface{}, args ...interface{}) DB
+			First(dest interface{}, conds ...interface{}) error
+		}
+		db := database.(DB)
+		if err := db.Where("api_token = ?", apiToken).First(&node); err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"success": false,
+				"message": "无效的API令牌",
+			})
+			c.Abort()
+			return
+		}
+
+		// 将节点信息存入上下文
+		c.Set("node", &node)
+		c.Set("node_id", node.ID)
+		c.Set("node_name", node.Name)
 		
 		c.Next()
 	}
