@@ -91,12 +91,31 @@ func (sc *SystemController) UpdateSettings(c *gin.Context) {
 		return
 	}
 
+	// 检测哪些配置发生了变化
+	logLevelChanged := sc.cfg.Server.LogLevel != req.Server.LogLevel
+	portChanged := sc.cfg.Server.Port != req.Server.Port
+	basePathChanged := sc.cfg.Server.BasePath != req.Server.BasePath
+	jwtExpireChanged := sc.cfg.Security.JWTExpireHour != req.Security.JWTExpireHour
+	twoFactorChanged := sc.cfg.Security.TwoFactorName != req.Security.TwoFactorName
+
 	// 更新内存中的配置
 	sc.cfg.Server.Port = req.Server.Port
 	sc.cfg.Server.BasePath = req.Server.BasePath
 	sc.cfg.Server.LogLevel = req.Server.LogLevel
 	sc.cfg.Security.JWTExpireHour = req.Security.JWTExpireHour
 	sc.cfg.Security.TwoFactorName = req.Security.TwoFactorName
+
+	// 热重载：立即应用日志级别变更
+	if logLevelChanged {
+		switch req.Server.LogLevel {
+		case "debug":
+			gin.SetMode(gin.DebugMode)
+		case "info", "warn", "error":
+			gin.SetMode(gin.ReleaseMode)
+		default:
+			gin.SetMode(gin.ReleaseMode)
+		}
+	}
 
 	// 保存配置到文件
 	configPath := os.Getenv("CONFIG_PATH")
@@ -165,13 +184,59 @@ func (sc *SystemController) UpdateSettings(c *gin.Context) {
 		return
 	}
 
+	// 判断是否需要重启（端口和路径变更需要重启）
+	needsRestart := portChanged || basePathChanged
+
+	// 生成提示消息
+	var message string
+	var hotReloadedItems []string
+	var restartRequiredItems []string
+
+	if logLevelChanged {
+		hotReloadedItems = append(hotReloadedItems, "日志级别")
+	}
+	if jwtExpireChanged || twoFactorChanged {
+		hotReloadedItems = append(hotReloadedItems, "安全设置")
+	}
+	if portChanged {
+		restartRequiredItems = append(restartRequiredItems, "监听端口")
+	}
+	if basePathChanged {
+		restartRequiredItems = append(restartRequiredItems, "基础路径")
+	}
+
+	if len(hotReloadedItems) > 0 && len(restartRequiredItems) == 0 {
+		message = fmt.Sprintf("配置已保存并立即生效（%s）", joinStrings(hotReloadedItems, "、"))
+	} else if len(hotReloadedItems) > 0 && len(restartRequiredItems) > 0 {
+		message = fmt.Sprintf("配置已保存，%s 已立即生效，%s 需要重启服务后生效",
+			joinStrings(hotReloadedItems, "、"), joinStrings(restartRequiredItems, "、"))
+	} else if len(restartRequiredItems) > 0 {
+		message = fmt.Sprintf("配置已保存，%s 需要重启服务后生效", joinStrings(restartRequiredItems, "、"))
+	} else {
+		message = "配置已保存"
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "配置已保存，重启服务后生效",
+		"success":           true,
+		"message":           message,
 		"data": gin.H{
-			"needs_restart": true,
+			"needs_restart":        needsRestart,
+			"hot_reloaded":         hotReloadedItems,
+			"restart_required":     restartRequiredItems,
 		},
 	})
+}
+
+// joinStrings 连接字符串数组
+func joinStrings(items []string, sep string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	result := items[0]
+	for i := 1; i < len(items); i++ {
+		result += sep + items[i]
+	}
+	return result
 }
 
 // GetLogs 获取系统日志
