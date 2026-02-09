@@ -433,7 +433,15 @@ build_backend() {
     go mod download || error_exit "后端依赖下载失败"
     
     log_info "正在编译后端..."
-    go build -o uniproxy ./cmd/main.go || error_exit "后端编译失败"
+    # 检查 cmd/main.go 是否存在
+    if [[ ! -f "cmd/main.go" ]]; then
+        log_error "找不到 cmd/main.go 文件"
+        ls -la cmd/ || log_error "cmd 目录不存在"
+        error_exit "后端代码结构不正确"
+    fi
+    
+    # 使用正确的构建命令
+    /usr/local/go/bin/go build -o uniproxy cmd/main.go || error_exit "后端编译失败"
     
     log_info "后端构建完成"
 }
