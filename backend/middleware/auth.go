@@ -112,10 +112,23 @@ func GenerateToken(userID uint, username, role string, cfg *config.Config) (stri
 // NodeAPIAuth 节点API认证中间件（使用API Token）
 func NodeAPIAuth(database interface{}) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 从Header获取API Token
+		// 从 Header 获取 API Token
 		apiToken := c.GetHeader("X-API-Token")
 		if apiToken == "" {
+			// 尝试从 Authorization Bearer 获取
+			authHeader := c.GetHeader("Authorization")
+			if authHeader != "" {
+				parts := strings.SplitN(authHeader, " ", 2)
+				if len(parts) == 2 && parts[0] == "Bearer" {
+					apiToken = parts[1]
+				}
+			}
+		}
+		if apiToken == "" {
 			// 尝试从查询参数获取
+			apiToken = c.Query("token")
+		}
+		if apiToken == "" {
 			apiToken = c.Query("api_token")
 		}
 
@@ -164,7 +177,7 @@ func NodeAPIAuth(database interface{}) gin.HandlerFunc {
 		c.Set("node", &node)
 		c.Set("node_id", node.ID)
 		c.Set("node_name", node.Name)
-		
+
 		c.Next()
 	}
 }
