@@ -199,8 +199,18 @@ cp "$ACTIVE_CONFIG" "${ACTIVE_CONFIG}.backup.$(date +%Y%m%d_%H%M%S)"
 # 修改端口配置（使用更精确的匹配）
 print_info "更新配置文件端口为: $CONFIG_PORT"
 
-# 只替换 server 部分的 port 配置
-sed -i "/^server:/,/^[a-z]/ s/^  port: *[0-9]\+/  port: $CONFIG_PORT/" "$ACTIVE_CONFIG"
+# 只替换 server 部分的 port 配置（更精确的匹配）
+# 使用 awk 确保只修改 server 块中的 port
+awk -v port="$CONFIG_PORT" '
+/^server:/ { in_server=1 }
+in_server && /^  port:/ && !port_replaced { 
+    print "  port: " port
+    port_replaced=1
+    next
+}
+/^[a-z]/ && !/^server:/ { in_server=0 }
+{ print }
+' "$ACTIVE_CONFIG" > "${ACTIVE_CONFIG}.tmp" && mv "${ACTIVE_CONFIG}.tmp" "$ACTIVE_CONFIG"
 
 # 验证修改是否成功
 NEW_PORT=$(grep -E "^  port:" "$ACTIVE_CONFIG" | awk '{print $2}' | head -1)
@@ -332,17 +342,34 @@ if systemctl is-active --quiet uniproxy-panel; then
     print_info "验证端口监听状态..."
     sleep 2
     
+    LISTENING_PORT=""
     if command -v ss &> /dev/null; then
         LISTENING_PORT=$(ss -tlnp 2>/dev/null | grep uniproxy-panel | grep -oP ':\K[0-9]+' | head -1)
-        if [ -n "$LISTENING_PORT" ]; then
-            print_success "后端实际监听端口: $LISTENING_PORT"
-            if [ "$LISTENING_PORT" != "$BACKEND_PORT" ]; then
-                print_error "警告：实际监听端口 ($LISTENING_PORT) 与配置端口 ($BACKEND_PORT) 不一致！"
-                print_warning "请检查后端日志: journalctl -u uniproxy-panel -n 50"
+    elif command -v netstat &> /dev/null; then
+        LISTENING_PORT=$(netstat -tlnp 2>/dev/null | grep uniproxy-panel | grep -oP ':\K[0-9]+' | head -1)
+    fi
+    
+    if [ -n "$LISTENING_PORT" ]; then
+        print_success "后端实际监听端口: $LISTENING_PORT"
+        
+        if [ "$LISTENING_PORT" != "$BACKEND_PORT" ]; then
+            print_error "警告：实际监听端口 ($LISTENING_PORT) 与配置端口 ($BACKEND_PORT) 不一致！"
+            print_warning "正在自动修复 Nginx 配置..."
+            
+            # 自动更新 Nginx 配置为实际监听端口
+            sed -i "s/127\.0\.0\.1:[0-9]\+/127.0.0.1:$LISTENING_PORT/g" /etc/nginx/sites-available/uniproxy-panel
+            
+            if nginx -t 2>/dev/null; then
+                systemctl reload nginx
+                print_success "Nginx 配置已自动更新为端口 $LISTENING_PORT"
+                BACKEND_PORT=$LISTENING_PORT
+            else
+                print_error "Nginx 配置更新失败"
             fi
-        else
-            print_warning "无法检测到后端监听端口"
         fi
+    else
+        print_warning "无法检测到后端监听端口，请检查服务状态"
+        print_info "查看后端日志: journalctl -u uniproxy-panel -n 50"
     fi
     
     # 测试后端 API
