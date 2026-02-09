@@ -336,10 +336,207 @@ func (s *BBRService) collectNetworkMetrics(metrics *NetworkMetrics) error {
 		}
 	}
 
-	// 模拟其他指标 (实际应从网卡统计获取)
-	metrics.Bandwidth = 100.0
-	metrics.PacketLoss = 0.1
-	metrics.Congestion = 10.0
+	// 获取带宽 (从 /sys/class/net 获取网卡速率)
+	if bandwidth, err := s.getNetworkBandwidth(); err == nil {
+		metrics.Bandwidth = bandwidth
+	} else {
+		metrics.Bandwidth = 0 // 无法获取时设为0
+	}
+
+	// 获取丢包率 (从 /proc/net/dev 获取)
+	if packetLoss, err := s.getPacketLoss(); err == nil {
+		metrics.PacketLoss = packetLoss
+	} else {
+		metrics.PacketLoss = 0
+	}
+
+	// 获取拥塞率 (基于 TCP 重传率计算)
+	if congestion, err := s.getCongestionRate(); err == nil {
+		metrics.Congestion = congestion
+	} else {
+		metrics.Congestion = 0
+	}
 
 	return nil
+}
+
+// getNetworkBandwidth 获取网络带宽 (Mbps)
+func (s *BBRService) getNetworkBandwidth() (float64, error) {
+	// 获取主要网卡
+	interface_name, err := s.getPrimaryInterface()
+	if err != nil {
+		return 0, err
+	}
+
+	// 读取网卡速率
+	speedPath := fmt.Sprintf("/sys/class/net/%s/speed", interface_name)
+	data, err := os.ReadFile(speedPath)
+	if err != nil {
+		// 如果无法读取，尝试使用 ethtool
+		return s.getBandwidthViaEthtool(interface_name)
+	}
+
+	speed, err := strconv.ParseFloat(strings.TrimSpace(string(data)), 64)
+	if err != nil {
+		return 0, err
+	}
+
+	// speed 单位是 Mbps，如果为 -1 表示未连接
+	if speed < 0 {
+		return 0, fmt.Errorf("网卡未连接")
+	}
+
+	return speed, nil
+}
+
+// getPrimaryInterface 获取主要网络接口
+func (s *BBRService) getPrimaryInterface() (string, error) {
+	// 使用 ip route 获取默认路由的网卡
+	cmd := exec.Command("ip", "route", "show", "default")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	// 解析输出: default via 192.168.1.1 dev eth0
+	re := regexp.MustCompile(`dev\s+(\S+)`)
+	matches := re.FindStringSubmatch(string(output))
+	if len(matches) < 2 {
+		return "eth0", nil // 默认返回 eth0
+	}
+
+	return matches[1], nil
+}
+
+// getBandwidthViaEthtool 通过 ethtool 获取带宽
+func (s *BBRService) getBandwidthViaEthtool(iface string) (float64, error) {
+	cmd := exec.Command("ethtool", iface)
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+
+	// 解析输出: Speed: 1000Mb/s
+	re := regexp.MustCompile(`Speed:\s+(\d+)Mb/s`)
+	matches := re.FindStringSubmatch(string(output))
+	if len(matches) < 2 {
+		return 0, fmt.Errorf("无法解析带宽")
+	}
+
+	speed, err := strconv.ParseFloat(matches[1], 64)
+	if err != nil {
+		return 0, err
+	}
+
+	return speed, nil
+}
+
+// getPacketLoss 获取丢包率 (%)
+func (s *BBRService) getPacketLoss() (float64, error) {
+	// 读取 /proc/net/dev
+	data, err := os.ReadFile("/proc/net/dev")
+	if err != nil {
+		return 0, err
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var totalRx, totalTx, totalErrors uint64
+
+	for _, line := range lines {
+		if !strings.Contains(line, ":") {
+			continue
+		}
+
+		fields := strings.Fields(line)
+		if len(fields) < 11 {
+			continue
+		}
+
+		// 跳过 lo 接口
+		if strings.HasPrefix(fields[0], "lo:") {
+			continue
+		}
+
+		// 字段格式: iface: rx_bytes rx_packets rx_errors ...
+		rxPackets, _ := strconv.ParseUint(fields[2], 10, 64)
+		txPackets, _ := strconv.ParseUint(fields[10], 10, 64)
+		rxErrors, _ := strconv.ParseUint(fields[3], 10, 64)
+		txErrors, _ := strconv.ParseUint(fields[11], 10, 64)
+
+		totalRx += rxPackets
+		totalTx += txPackets
+		totalErrors += rxErrors + txErrors
+	}
+
+	totalPackets := totalRx + totalTx
+	if totalPackets == 0 {
+		return 0, nil
+	}
+
+	packetLoss := (float64(totalErrors) / float64(totalPackets)) * 100
+	return packetLoss, nil
+}
+
+// getCongestionRate 获取拥塞率 (%)
+func (s *BBRService) getCongestionRate() (float64, error) {
+	// 读取 TCP 统计信息
+	data, err := os.ReadFile("/proc/net/netstat")
+	if err != nil {
+		return 0, err
+	}
+
+	lines := strings.Split(string(data), "\n")
+	var retransSegs, outSegs uint64
+
+	for i := 0; i < len(lines)-1; i++ {
+		if strings.HasPrefix(lines[i], "TcpExt:") && strings.Contains(lines[i], "TCPRetransSegs") {
+			// 找到对应的值行
+			if i+1 < len(lines) && strings.HasPrefix(lines[i+1], "TcpExt:") {
+				headers := strings.Fields(lines[i])
+				values := strings.Fields(lines[i+1])
+
+				for j, header := range headers {
+					if j < len(values) {
+						if header == "TCPRetransSegs" {
+							retransSegs, _ = strconv.ParseUint(values[j], 10, 64)
+						}
+					}
+				}
+			}
+			break
+		}
+	}
+
+	// 读取 /proc/net/snmp 获取 OutSegs
+	data, err = os.ReadFile("/proc/net/snmp")
+	if err != nil {
+		return 0, err
+	}
+
+	lines = strings.Split(string(data), "\n")
+	for i := 0; i < len(lines)-1; i++ {
+		if strings.HasPrefix(lines[i], "Tcp:") && strings.Contains(lines[i], "OutSegs") {
+			if i+1 < len(lines) && strings.HasPrefix(lines[i+1], "Tcp:") {
+				headers := strings.Fields(lines[i])
+				values := strings.Fields(lines[i+1])
+
+				for j, header := range headers {
+					if j < len(values) {
+						if header == "OutSegs" {
+							outSegs, _ = strconv.ParseUint(values[j], 10, 64)
+						}
+					}
+				}
+			}
+			break
+		}
+	}
+
+	if outSegs == 0 {
+		return 0, nil
+	}
+
+	// 拥塞率 = 重传段数 / 发送段数 * 100
+	congestionRate := (float64(retransSegs) / float64(outSegs)) * 100
+	return congestionRate, nil
 }
