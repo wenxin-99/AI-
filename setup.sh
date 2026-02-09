@@ -130,9 +130,9 @@ fi
 cd /opt/uniproxy-panel
 
 # ============================================
-# 步骤 3: 配置端口
+# 步骤 3: 智能端口配置
 # ============================================
-print_step "3/6" "配置后端端口..."
+print_step "3/6" "智能检测和配置端口..."
 
 CONFIG_FILE="/opt/uniproxy-panel/config.yaml"
 BACKEND_CONFIG="/opt/uniproxy-panel/backend/config.yaml"
@@ -147,14 +147,41 @@ else
     exit 1
 fi
 
+# 检测配置文件中的端口
+CONFIG_PORT=$(grep -E "^  port:" "$ACTIVE_CONFIG" | awk '{print $2}' | head -1)
+if [ -z "$CONFIG_PORT" ]; then
+    CONFIG_PORT="8080"
+    print_warning "未检测到端口配置，使用默认端口 8080"
+else
+    print_info "检测到配置端口: $CONFIG_PORT"
+fi
+
+# 检查端口是否被占用
+if command -v ss &> /dev/null; then
+    if ss -tlnp | grep -q ":$CONFIG_PORT "; then
+        print_warning "端口 $CONFIG_PORT 已被占用"
+        # 尝试使用备用端口
+        for ALT_PORT in 8080 8081 8082 8083 8084 8085; do
+            if ! ss -tlnp | grep -q ":$ALT_PORT "; then
+                CONFIG_PORT=$ALT_PORT
+                print_info "使用备用端口: $CONFIG_PORT"
+                break
+            fi
+        done
+    fi
+fi
+
 # 备份配置文件
 cp "$ACTIVE_CONFIG" "${ACTIVE_CONFIG}.backup.$(date +%Y%m%d_%H%M%S)"
 
-# 修改端口为 8080
-sed -i 's/port: *2053/port: 8080/g' "$ACTIVE_CONFIG"
-sed -i 's/listen: *2053/listen: 8080/g' "$ACTIVE_CONFIG"
+# 修改端口配置
+sed -i "s/port: *[0-9]\+/port: $CONFIG_PORT/g" "$ACTIVE_CONFIG"
+sed -i "s/listen: *[0-9]\+/listen: $CONFIG_PORT/g" "$ACTIVE_CONFIG"
 
-print_success "端口已配置为 8080"
+# 保存端口到环境变量供后续使用
+export BACKEND_PORT=$CONFIG_PORT
+
+print_success "后端端口已配置为 $CONFIG_PORT"
 
 # ============================================
 # 步骤 4: 创建 systemd 服务
@@ -195,8 +222,10 @@ if ! command -v nginx &> /dev/null; then
     apt-get install -y nginx
 fi
 
-# 创建 Nginx 配置
-cat > /etc/nginx/sites-available/uniproxy-panel <<'EOF'
+# 创建 Nginx 配置（使用动态端口）
+print_info "配置 Nginx 代理到后端端口: $BACKEND_PORT"
+
+cat > /etc/nginx/sites-available/uniproxy-panel <<EOF
 server {
     listen 80;
     server_name _;
@@ -204,13 +233,13 @@ server {
     # 前端静态文件
     location / {
         root /var/www/uniproxy-panel;
-        try_files $uri $uri/ /index.html;
+        try_files \$uri \$uri/ /index.html;
         index index.html;
     }
 
     # API 代理到后端
     location /api {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:$BACKEND_PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection 'upgrade';
@@ -228,7 +257,7 @@ server {
 
     # WebSocket 支持
     location /ws {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:$BACKEND_PORT;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -294,6 +323,7 @@ echo -e "${GREEN}✓ 所有服务已成功启动${NC}"
 echo ""
 echo -e "${BLUE}访问信息：${NC}"
 echo -e "  前端地址: ${YELLOW}http://$SERVER_IP${NC}"
+echo -e "  后端端口: ${YELLOW}$BACKEND_PORT${NC}"
 echo -e "  默认账号: ${YELLOW}admin${NC}"
 echo -e "  默认密码: ${YELLOW}admin 或 admin123${NC}"
 echo ""
