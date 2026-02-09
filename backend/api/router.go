@@ -1,8 +1,6 @@
 package api
 
 import (
-	"net/http"
-
 	"github.com/gin-gonic/gin"
 	"github.com/uniproxy/panel/config"
 	"github.com/uniproxy/panel/controllers"
