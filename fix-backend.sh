@@ -137,6 +137,45 @@ if [ -f "uniproxy-panel" ]; then
     echo -e "${GREEN}✓ 编译成功！${NC}"
     ls -lh uniproxy-panel
     
+    # 检查配置文件
+    echo -e "${YELLOW}检查配置文件...${NC}"
+    if [ ! -f "/opt/uniproxy-panel/config.yaml" ]; then
+        echo -e "${YELLOW}配置文件不存在，使用示例配置...${NC}"
+        if [ -f "config.example.yaml" ]; then
+            cp config.example.yaml /opt/uniproxy-panel/config.yaml
+        elif [ -f "config.yaml" ]; then
+            cp config.yaml /opt/uniproxy-panel/config.yaml
+        else
+            echo -e "${RED}警告：找不到配置文件${NC}"
+        fi
+    fi
+    
+    # 创建 systemd 服务文件
+    echo -e "${YELLOW}创建 systemd 服务...${NC}"
+    cat > /etc/systemd/system/uniproxy-panel.service <<EOF
+[Unit]
+Description=UniProxy Panel Backend Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/uniproxy-panel/backend
+ExecStart=/opt/uniproxy-panel/backend/uniproxy-panel -config /opt/uniproxy-panel/config.yaml
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    echo -e "${GREEN}✓ systemd 服务文件已创建${NC}"
+    
+    # 重载 systemd 并启用服务
+    echo -e "${YELLOW}重载 systemd 配置...${NC}"
+    systemctl daemon-reload
+    systemctl enable uniproxy-panel
+    
     # 重启服务
     echo -e "${YELLOW}重启后端服务...${NC}"
     systemctl restart uniproxy-panel
