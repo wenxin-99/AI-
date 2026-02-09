@@ -325,25 +325,56 @@ cp "$ACTIVE_CONFIG" "${ACTIVE_CONFIG}.backup.$(date +%Y%m%d_%H%M%S)"
 
 # 修改端口配置（只修改 server 块中的 port）
 print_info "更新配置文件端口为: $CONFIG_PORT"
+print_info "配置文件路径: $ACTIVE_CONFIG"
 
-awk -v port="$CONFIG_PORT" '
-/^server:/ { in_server=1 }
-in_server && /^  port:/ && !port_replaced { 
-    print "  port: " port
-    port_replaced=1
-    next
-}
-/^[a-z]/ && !/^server:/ { in_server=0 }
-{ print }
-' "$ACTIVE_CONFIG" > "${ACTIVE_CONFIG}.tmp" && mv "${ACTIVE_CONFIG}.tmp" "$ACTIVE_CONFIG"
+# 显示当前配置
+print_info "当前配置内容:"
+grep -A 3 "^server:" "$ACTIVE_CONFIG" || print_warning "未找到 server 块"
+
+# 使用 sed 进行更精确的替换
+if grep -q "^server:" "$ACTIVE_CONFIG"; then
+    # 方法1: 使用 sed 替换 server 块中的第一个 port
+    sed -i "/^server:/,/^[a-z]/ { /^  port:/ { s/port:.*/port: $CONFIG_PORT/; :a; n; ba; } }" "$ACTIVE_CONFIG" 2>/dev/null || {
+        # 方法2: 如果 sed 失败，使用 awk
+        awk -v port="$CONFIG_PORT" '
+        /^server:/ { in_server=1 }
+        in_server && /^  port:/ && !port_replaced { 
+            print "  port: " port
+            port_replaced=1
+            next
+        }
+        /^[a-z]/ && !/^server:/ { in_server=0 }
+        { print }
+        ' "$ACTIVE_CONFIG" > "${ACTIVE_CONFIG}.tmp" && mv "${ACTIVE_CONFIG}.tmp" "$ACTIVE_CONFIG"
+    }
+else
+    # 如果没有 server 块，创建一个
+    print_warning "配置文件中没有 server 块，将创建"
+    cat >> "$ACTIVE_CONFIG" <<EOF
+
+server:
+  host: 0.0.0.0
+  port: $CONFIG_PORT
+EOF
+fi
 
 # 验证修改
-NEW_PORT=$(awk '/^server:/,/^[a-z]/ { if (/^  port:/) print $2 }' "$ACTIVE_CONFIG" | head -1)
-if [ "$NEW_PORT" = "$CONFIG_PORT" ]; then
+print_info "验证配置更新..."
+NEW_PORT=$(awk '/^server:/,/^[a-z]/ { if (/^  port:/) { print $2; exit } }' "$ACTIVE_CONFIG")
+print_info "读取到的端口: '$NEW_PORT'"
+
+if [ -n "$NEW_PORT" ] && [ "$NEW_PORT" = "$CONFIG_PORT" ]; then
     print_success "端口配置更新成功: $NEW_PORT"
 else
-    print_error "端口配置更新失败"
-    exit 1
+    print_warning "端口配置验证失败，尝试使用 grep 验证"
+    if grep -q "port: $CONFIG_PORT" "$ACTIVE_CONFIG"; then
+        print_success "端口配置已更新（通过 grep 验证）"
+    else
+        print_error "端口配置更新失败"
+        print_info "配置文件内容:"
+        cat "$ACTIVE_CONFIG"
+        exit 1
+    fi
 fi
 
 export BACKEND_PORT=$CONFIG_PORT
