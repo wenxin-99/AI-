@@ -209,7 +209,20 @@ pnpm build
 print_info "部署前端文件..."
 rm -rf "$WEB_DIR"
 mkdir -p "$WEB_DIR"
-cp -r dist/public/* "$WEB_DIR/"
+
+# 检查构建输出目录
+if [ -d "../dist/public" ]; then
+    cp -r ../dist/public/* "$WEB_DIR/"
+    print_success "前端文件部署成功"
+elif [ -d "dist/public" ]; then
+    cp -r dist/public/* "$WEB_DIR/"
+    print_success "前端文件部署成功"
+else
+    print_error "找不到前端构建输出目录"
+    print_info "尝试查找构建输出..."
+    find "$INSTALL_DIR" -name "index.html" -path "*/dist/*" | head -5
+    exit 1
+fi
 
 print_success "前端编译完成"
 
