@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/uniproxy/panel/config"
+	"gorm.io/gorm"
 )
 
 // Claims JWT声明
@@ -158,13 +159,18 @@ func NodeAPIAuth(database interface{}) gin.HandlerFunc {
 		}
 
 		var node Node
-		// 使用 GORM 查询节点
-		type DB interface {
-			Where(query interface{}, args ...interface{}) DB
-			First(dest interface{}, conds ...interface{}) error
+		// 直接使用 *gorm.DB 类型
+		db, ok := database.(*gorm.DB)
+		if !ok {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": "数据库连接错误",
+			})
+			c.Abort()
+			return
 		}
-		db := database.(DB)
-		if err := db.Where("api_token = ?", apiToken).First(&node); err != nil {
+
+		if err := db.Where("api_token = ?", apiToken).First(&node).Error; err != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"success": false,
 				"message": "无效的API令牌",
