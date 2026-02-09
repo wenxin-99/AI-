@@ -24,13 +24,11 @@ func SetupRouter(cfg *config.Config, db *gorm.DB) *gin.Engine {
 	// 应用中间件
 	router.Use(middleware.CORS())
 
-	// 健康检查
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"success": true,
-			"message": "服务运行正常",
-		})
-	})
+	// 健康检查（支持两个路径）
+	healthController := controllers.NewHealthController()
+	router.GET("/health", healthController.Check)
+	router.GET("/api/health", healthController.Check)
+	router.GET("/ping", healthController.Ping)
 
 	// 初始化控制器
 	authController := controllers.NewAuthController(cfg, db)
