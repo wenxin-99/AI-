@@ -1,21 +1,19 @@
 /**
- * Socket.io 管理器
+ * Socket.io 管理器 - 负责实时沙箱事件的广播
  * 
- * 负责管理 Socket.io 服务器实例和沙箱事件的广播。
- * 所有沙箱事件（浏览器截图、代码执行、终端输出等）都通过此模块统一推送到前端。
+ * 增强功能：事件缓冲区，当客户端加入任务房间时，自动回放最近的事件
  */
-import { Server as HttpServer } from "http";
 import { Server, Socket } from "socket.io";
+import type { Server as HttpServer } from "http";
 
-// ============ 事件类型定义 ============
-
+// ============ 类型定义 ============
 export type SandboxEventType =
-  | "browser_navigate"    // Agent 开始访问一个URL
-  | "browser_screenshot"  // 浏览器截图完成
+  | "browser_navigate"    // 浏览器导航到新URL
+  | "browser_screenshot"  // 浏览器页面截图
   | "browser_loading"     // 浏览器正在加载
   | "code_update"         // 代码内容更新
-  | "terminal_output"     // 终端输出
   | "terminal_command"    // 终端执行命令
+  | "terminal_output"     // 终端输出内容
   | "agent_thinking"      // Agent 正在思考
   | "agent_searching"     // Agent 正在搜索
   | "agent_step"          // Agent 完成一个步骤
@@ -30,8 +28,54 @@ export interface SandboxEvent {
 }
 
 // ============ 单例管理 ============
-
 let io: Server | null = null;
+
+// ============ 事件缓冲区 ============
+// 为每个任务保存最近的事件，以便新连接的客户端可以回放
+const EVENT_BUFFER_SIZE = 50; // 每个任务最多缓存50个事件
+const EVENT_BUFFER_TTL = 30 * 60 * 1000; // 事件缓冲区30分钟过期
+const taskEventBuffers = new Map<number, SandboxEvent[]>();
+const taskBufferTimestamps = new Map<number, number>(); // 记录最后更新时间
+
+/**
+ * 将事件添加到缓冲区
+ */
+function bufferEvent(event: SandboxEvent): void {
+  const taskId = event.taskId;
+  if (!taskEventBuffers.has(taskId)) {
+    taskEventBuffers.set(taskId, []);
+  }
+  const buffer = taskEventBuffers.get(taskId)!;
+  buffer.push(event);
+  // 限制缓冲区大小（保留最新的事件）
+  if (buffer.length > EVENT_BUFFER_SIZE) {
+    buffer.splice(0, buffer.length - EVENT_BUFFER_SIZE);
+  }
+  taskBufferTimestamps.set(taskId, Date.now());
+}
+
+/**
+ * 获取任务的缓冲事件
+ */
+function getBufferedEvents(taskId: number): SandboxEvent[] {
+  return taskEventBuffers.get(taskId) || [];
+}
+
+/**
+ * 清理过期的事件缓冲区
+ */
+function cleanupExpiredBuffers(): void {
+  const now = Date.now();
+  for (const [taskId, lastUpdate] of taskBufferTimestamps.entries()) {
+    if (now - lastUpdate > EVENT_BUFFER_TTL) {
+      taskEventBuffers.delete(taskId);
+      taskBufferTimestamps.delete(taskId);
+    }
+  }
+}
+
+// 每5分钟清理一次过期缓冲区
+setInterval(cleanupExpiredBuffers, 5 * 60 * 1000);
 
 /**
  * 初始化 Socket.io 服务器
@@ -62,6 +106,15 @@ export function initSocketIO(httpServer: HttpServer): Server {
       const room = `task_${taskId}`;
       socket.join(room);
       console.log(`[SocketIO] Client ${socket.id} joined room ${room}`);
+      
+      // 回放缓冲区中的事件，让新连接的客户端看到之前的步骤
+      const bufferedEvents = getBufferedEvents(taskId);
+      if (bufferedEvents.length > 0) {
+        console.log(`[SocketIO] Replaying ${bufferedEvents.length} buffered events for task ${taskId}`);
+        for (const event of bufferedEvents) {
+          socket.emit("sandbox_event", event);
+        }
+      }
     });
 
     // 客户端离开任务房间
@@ -76,7 +129,7 @@ export function initSocketIO(httpServer: HttpServer): Server {
     });
   });
 
-  console.log("[SocketIO] Server initialized");
+  console.log("[SocketIO] Server initialized with event buffering");
   return io;
 }
 
@@ -88,14 +141,16 @@ export function getIO(): Server | null {
 }
 
 /**
- * 向特定任务房间广播沙箱事件
+ * 向特定任务房间广播沙箱事件（同时缓存到缓冲区）
  */
 export function emitSandboxEvent(event: SandboxEvent): void {
+  // 始终缓存事件，即使 Socket.io 未初始化
+  bufferEvent(event);
+  
   if (!io) {
     console.warn("[SocketIO] Server not initialized, cannot emit event");
     return;
   }
-
   const room = `task_${event.taskId}`;
   io.to(room).emit("sandbox_event", event);
 }

@@ -1228,6 +1228,13 @@ export default function Chat() {
         setMessages(prev => [...prev, researchMsg]);
         setActiveResearchTaskId(result.taskId);
 
+        // 如果后端创建了新对话，更新前端的conversationId
+        if (result.conversationId && selectedConversationId === null) {
+          setSelectedConversationId(result.conversationId);
+        }
+        // 刷新对话列表以显示新对话/更新的对话
+        refetchConversations();
+
         toast.success(t('chat.research.started', { cost: result.cost }));
         refetchBalance();
       } catch (error: any) {
