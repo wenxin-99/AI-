@@ -1781,6 +1781,8 @@ export default function Chat() {
         onAutomationTask: (data) => {
           // 处理自动化任务事件 - 将当前助手消息标记为自动化任务
           console.log('[Chat] Automation task created:', data);
+          // 激活右侧沙箱面板，显示浏览器截图（复用研究任务的沙箱面板）
+          setActiveResearchTaskId(data.taskId);
           setMessages((prev) => {
             const newMessages = [...prev];
             const lastMessage = newMessages[newMessages.length - 1];

@@ -337,14 +337,18 @@ ${task.targetUrls ? `目标URL列表：${task.targetUrls}` : ""}
   "params": { "参数名": "参数值" }
 }
 
+目标网站域名：${new URL(account.siteUrl).hostname}
+
 重要规则：
 - 每次只执行一个操作
+- 【严禁】导航到目标网站以外的任何网站！你只能在 ${new URL(account.siteUrl).hostname} 域名下操作
+- 如果当前页面不在目标网站域名下，必须立即 navigate 回目标网站
 - 优先使用 click_text 或 click_index，而不是 click(selector)，因为文本和索引更可靠
 - 如果使用 click(selector)，selector 必须是元素列表中提供的确切选择器，不要自己编造
 - 如果看到验证码，优先处理验证码
 - 如果登录失败，最多重试 3 次
 - 如果页面没有变化，尝试不同的操作
-- 如果 click 失败，尝试用 navigate 直接跳转到目标 URL
+- 如果 click 失败，尝试用 navigate 直接跳转到目标网站的相关页面（如 ${account.siteUrl}/new 发帖页）
 - 发帖/回复内容必须自然、有价值，不能是垃圾内容
 - 完成所有操作后调用 done() 工具`;
 
@@ -660,6 +664,18 @@ export async function executeAutomationTask(taskId: number): Promise<void> {
             const url = action.params.url;
             if (!url || typeof url !== "string") {
               throw new Error("navigate 需要有效的 URL 参数");
+            }
+            // 限制只能导航到目标网站域名
+            try {
+              const targetHost = new URL(account.siteUrl).hostname;
+              const navHost = new URL(url).hostname;
+              if (!navHost.includes(targetHost) && !targetHost.includes(navHost)) {
+                console.warn(`[AutomationService] Blocked navigation to ${navHost}, only ${targetHost} allowed`);
+                throw new Error(`禁止导航到其他网站 ${navHost}，只允许在 ${targetHost} 下操作`);
+              }
+            } catch (urlErr: any) {
+              if (urlErr.message.includes('禁止导航')) throw urlErr;
+              // URL 解析失败，尝试继续
             }
             emitBrowserLoading(taskId, url);
             await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30000 });

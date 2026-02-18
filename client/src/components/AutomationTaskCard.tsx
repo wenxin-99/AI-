@@ -5,7 +5,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import {
   Bot, ExternalLink, Loader2, CheckCircle2, XCircle, Clock,
-  Monitor, ChevronDown, ChevronUp, Gamepad2, Hand, Eye,
+  ChevronDown, ChevronUp, Eye,
   MousePointer, Keyboard, Navigation, LogIn, FileText, Send
 } from "lucide-react";
 import { io, Socket } from "socket.io-client";
@@ -21,7 +21,7 @@ interface SandboxEvent {
 
 interface StepItem {
   id: number;
-  type: string; // thought, action, error, navigate, login, captcha, click, type, post
+  type: string;
   content: string;
   timestamp: number;
   duration?: number;
@@ -37,15 +37,15 @@ interface AutomationTaskCardProps {
 
 function getStepIcon(type: string) {
   switch (type) {
-    case "navigate": return <Navigation className="h-3.5 w-3.5 text-blue-500" />;
-    case "login": return <LogIn className="h-3.5 w-3.5 text-green-500" />;
-    case "captcha": return <Eye className="h-3.5 w-3.5 text-purple-500" />;
-    case "click": return <MousePointer className="h-3.5 w-3.5 text-orange-500" />;
-    case "type": return <Keyboard className="h-3.5 w-3.5 text-cyan-500" />;
-    case "post": return <Send className="h-3.5 w-3.5 text-emerald-500" />;
-    case "thought": return <Bot className="h-3.5 w-3.5 text-yellow-500" />;
-    case "error": return <XCircle className="h-3.5 w-3.5 text-red-500" />;
-    default: return <FileText className="h-3.5 w-3.5 text-gray-500" />;
+    case "navigate": return <Navigation className="h-3 w-3 text-blue-500" />;
+    case "login": return <LogIn className="h-3 w-3 text-green-500" />;
+    case "captcha": return <Eye className="h-3 w-3 text-purple-500" />;
+    case "click": return <MousePointer className="h-3 w-3 text-orange-500" />;
+    case "type": return <Keyboard className="h-3 w-3 text-cyan-500" />;
+    case "post": return <Send className="h-3 w-3 text-emerald-500" />;
+    case "thought": return <Bot className="h-3 w-3 text-yellow-500" />;
+    case "error": return <XCircle className="h-3 w-3 text-red-500" />;
+    default: return <FileText className="h-3 w-3 text-gray-500" />;
   }
 }
 
@@ -86,23 +86,18 @@ export function AutomationTaskCard({ taskId, taskName, siteName }: AutomationTas
   const [status, setStatus] = useState<string>("running");
   const [progress, setProgress] = useState(0);
   const [currentStep, setCurrentStep] = useState<string>("启动中...");
-  const [screenshot, setScreenshot] = useState<string>("");
-  const [browserUrl, setBrowserUrl] = useState<string>("");
   const [steps, setSteps] = useState<StepItem[]>([]);
   const [thinking, setThinking] = useState<string>("");
   const [isConnected, setIsConnected] = useState(false);
   const [showSteps, setShowSteps] = useState(true);
-  const [showBrowser, setShowBrowser] = useState(true);
-  const [takeoverActive, setTakeoverActive] = useState(false);
-  const [takeoverLoading, setTakeoverLoading] = useState(false);
+  const [browserUrl, setBrowserUrl] = useState<string>("");
 
   const socketRef = useRef<Socket | null>(null);
-  const imgRef = useRef<HTMLImageElement>(null);
   const stepCountRef = useRef(0);
   const startTimeRef = useRef(Date.now());
   const stepsEndRef = useRef<HTMLDivElement>(null);
 
-  // 连接 Socket.io
+  // 连接 Socket.io（仅用于接收步骤和状态，浏览器截图由右侧面板的 useSandboxSocket 处理）
   useEffect(() => {
     if (!taskId) return;
 
@@ -127,13 +122,8 @@ export function AutomationTaskCard({ taskId, taskName, siteName }: AutomationTas
     });
 
     socket.on("sandbox_event", (event: SandboxEvent) => {
+      if (event.taskId !== taskId) return;
       handleSandboxEvent(event);
-    });
-
-    socket.on("takeover_error", (data: { taskId: number; error: string }) => {
-      console.error("[AutomationCard] Takeover error:", data.error);
-      setTakeoverActive(false);
-      setTakeoverLoading(false);
     });
 
     return () => {
@@ -145,23 +135,21 @@ export function AutomationTaskCard({ taskId, taskName, siteName }: AutomationTas
     };
   }, [taskId]);
 
-  // 处理沙箱事件
+  // 处理沙箱事件（只处理步骤和状态，不处理截图）
   const handleSandboxEvent = useCallback((event: SandboxEvent) => {
     switch (event.type) {
       case "browser_screenshot":
-        setScreenshot(event.payload.screenshot);
+        // 截图由右侧面板处理，这里只更新 URL
         setBrowserUrl(event.payload.url || "");
         break;
 
       case "browser_navigate":
         setBrowserUrl(event.payload.url || "");
-        // 添加导航步骤
         addStep(event);
         break;
 
       case "agent_thinking":
         setThinking(event.payload.thought || "");
-        // 不为每个思考都添加步骤，只在内容变化较大时添加
         break;
 
       case "agent_step":
@@ -196,7 +184,6 @@ export function AutomationTaskCard({ taskId, taskName, siteName }: AutomationTas
     const elapsed = ((event.timestamp - startTimeRef.current) / 1000).toFixed(1);
 
     setSteps(prev => {
-      // 去重：如果最后一步内容相同，不重复添加
       if (prev.length > 0 && prev[prev.length - 1].content === content) {
         return prev;
       }
@@ -207,9 +194,8 @@ export function AutomationTaskCard({ taskId, taskName, siteName }: AutomationTas
         timestamp: event.timestamp,
         duration: parseFloat(elapsed),
       };
-      // 最多保留 30 步
       const updated = [...prev, newStep];
-      if (updated.length > 30) updated.splice(0, updated.length - 30);
+      if (updated.length > 50) updated.splice(0, updated.length - 50);
       return updated;
     });
   }, []);
@@ -243,92 +229,7 @@ export function AutomationTaskCard({ taskId, taskName, siteName }: AutomationTas
     return () => clearInterval(interval);
   }, [taskId, status]);
 
-  // ============ 接管操作 ============
-
-  const toggleTakeover = async () => {
-    setTakeoverLoading(true);
-    try {
-      const endpoint = takeoverActive ? "disable" : "enable";
-      const res = await fetch(`/api/automation/tasks/${taskId}/takeover/${endpoint}`, {
-        method: "POST",
-        credentials: "include",
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.success) {
-          setTakeoverActive(!takeoverActive);
-        } else {
-          alert(data.message || "接管操作失败：任务页面可能不存在");
-        }
-      } else {
-        const errData = await res.json().catch(() => ({}));
-        alert(errData.message || "接管操作失败");
-      }
-    } catch (err: any) {
-      alert("接管操作失败: " + (err.message || "网络错误"));
-    } finally {
-      setTakeoverLoading(false);
-    }
-  };
-
-  const handleTakeoverClick = (e: React.MouseEvent<HTMLImageElement>) => {
-    if (!takeoverActive || !imgRef.current || !socketRef.current) return;
-    e.preventDefault();
-    e.stopPropagation();
-
-    const rect = imgRef.current.getBoundingClientRect();
-    const scaleX = 1920 / rect.width;
-    const scaleY = 1080 / rect.height;
-    const x = Math.round((e.clientX - rect.left) * scaleX);
-    const y = Math.round((e.clientY - rect.top) * scaleY);
-
-    socketRef.current.emit("takeover_action", {
-      taskId,
-      action: "click",
-      payload: { x, y },
-    });
-  };
-
-  const handleTakeoverKeyDown = (e: React.KeyboardEvent) => {
-    if (!takeoverActive || !socketRef.current) return;
-    e.preventDefault();
-    e.stopPropagation();
-
-    let key = e.key;
-    if (e.ctrlKey && key !== "Control") key = `Control+${key}`;
-    if (e.altKey && key !== "Alt") key = `Alt+${key}`;
-    if (e.shiftKey && key !== "Shift" && key.length > 1) key = `Shift+${key}`;
-
-    socketRef.current.emit("takeover_action", {
-      taskId,
-      action: "key",
-      payload: { key },
-    });
-  };
-
-  const handleTakeoverScroll = (e: React.WheelEvent) => {
-    if (!takeoverActive || !socketRef.current) return;
-    e.preventDefault();
-    e.stopPropagation();
-
-    socketRef.current.emit("takeover_action", {
-      taskId,
-      action: "scroll",
-      payload: { deltaX: e.deltaX, deltaY: e.deltaY },
-    });
-  };
-
   // ============ 渲染 ============
-
-  const getStatusColor = () => {
-    switch (status) {
-      case "running": return "bg-blue-500";
-      case "completed": return "bg-green-500";
-      case "failed": return "bg-red-500";
-      case "pending": return "bg-yellow-500";
-      default: return "bg-gray-500";
-    }
-  };
 
   const getStatusText = () => {
     switch (status) {
@@ -343,11 +244,11 @@ export function AutomationTaskCard({ taskId, taskName, siteName }: AutomationTas
 
   const getStatusIcon = () => {
     switch (status) {
-      case "pending": return <Clock className="h-4 w-4 text-yellow-600" />;
-      case "running": return <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />;
-      case "completed": return <CheckCircle2 className="h-4 w-4 text-green-600" />;
-      case "failed": return <XCircle className="h-4 w-4 text-red-600" />;
-      default: return <Bot className="h-4 w-4 text-gray-600" />;
+      case "pending": return <Clock className="h-3.5 w-3.5 text-yellow-600" />;
+      case "running": return <Loader2 className="h-3.5 w-3.5 text-blue-600 animate-spin" />;
+      case "completed": return <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />;
+      case "failed": return <XCircle className="h-3.5 w-3.5 text-red-600" />;
+      default: return <Bot className="h-3.5 w-3.5 text-gray-600" />;
     }
   };
 
@@ -355,12 +256,12 @@ export function AutomationTaskCard({ taskId, taskName, siteName }: AutomationTas
 
   return (
     <Card className="w-full max-w-2xl border-blue-200/50 bg-gradient-to-b from-blue-50/30 to-white dark:from-blue-950/20 dark:to-background overflow-hidden">
-      {/* 头部 */}
+      {/* 头部 - 任务信息 */}
       <div className="px-4 py-3 border-b border-blue-100/50 dark:border-blue-900/30">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center">
-              <Bot className="h-4 w-4 text-blue-600" />
+            <div className="w-7 h-7 rounded-lg bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center">
+              <Bot className="h-3.5 w-3.5 text-blue-600" />
             </div>
             <div>
               <div className="font-medium text-sm flex items-center gap-2">
@@ -381,26 +282,15 @@ export function AutomationTaskCard({ taskId, taskName, siteName }: AutomationTas
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
-              onClick={() => setShowBrowser(!showBrowser)}
-              title={showBrowser ? "隐藏浏览器" : "显示浏览器"}
-            >
-              <Monitor className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 w-7 p-0"
-              onClick={() => setShowSteps(!showSteps)}
-              title={showSteps ? "隐藏步骤" : "显示步骤"}
-            >
-              {showSteps ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-            </Button>
-          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={() => setShowSteps(!showSteps)}
+            title={showSteps ? "隐藏步骤" : "显示步骤"}
+          >
+            {showSteps ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </Button>
         </div>
 
         {/* 进度条 */}
@@ -415,64 +305,34 @@ export function AutomationTaskCard({ taskId, taskName, siteName }: AutomationTas
         )}
       </div>
 
-      {/* 浏览器截图区域 */}
-      {showBrowser && (
-        <div className="relative">
-          {/* URL 栏 */}
-          {browserUrl && (
-            <div className="px-3 py-1.5 bg-gray-50 dark:bg-gray-900/50 border-b text-xs text-muted-foreground flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-green-500" />
-              <span className="truncate">{browserUrl}</span>
-            </div>
-          )}
+      {/* 当前 URL */}
+      {browserUrl && (
+        <div className="px-3 py-1.5 bg-gray-50 dark:bg-gray-900/50 border-b text-xs text-muted-foreground flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-green-500" />
+          <span className="truncate">{browserUrl}</span>
+        </div>
+      )}
 
-          {/* 截图 */}
-          <div
-            className="relative bg-gray-100 dark:bg-gray-900"
-            style={{ minHeight: screenshot ? "auto" : "120px" }}
-          >
-            {screenshot ? (
-              <img
-                ref={imgRef}
-                src={`data:image/jpeg;base64,${screenshot}`}
-                alt="浏览器画面"
-                className={`w-full h-auto ${takeoverActive ? "cursor-crosshair" : "cursor-default"}`}
-                style={{ userSelect: "none", maxHeight: "400px", objectFit: "contain" }}
-                tabIndex={0}
-                onClick={handleTakeoverClick}
-                onKeyDown={handleTakeoverKeyDown}
-                onWheel={handleTakeoverScroll}
-                onMouseDown={(e) => { if (takeoverActive) { e.preventDefault(); } }}
-                draggable={false}
-              />
-            ) : (
-              <div className="flex items-center justify-center h-[120px] text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                等待浏览器画面...
-              </div>
-            )}
-
-            {/* 接管模式指示器 */}
-            {takeoverActive && (
-              <div className="absolute top-2 right-2 px-2 py-1 bg-red-500/90 text-white text-xs rounded-full flex items-center gap-1 animate-pulse">
-                <Hand className="h-3 w-3" />
-                接管中 - 点击画面操作
-              </div>
-            )}
+      {/* 当前思考状态 */}
+      {thinking && !isFinished && (
+        <div className="px-4 py-2 bg-yellow-50/30 dark:bg-yellow-900/10 border-b border-yellow-100/30">
+          <div className="flex items-start gap-2 text-xs">
+            <Bot className="h-3 w-3 text-yellow-500 animate-pulse mt-0.5 flex-shrink-0" />
+            <span className="text-yellow-700 dark:text-yellow-400 line-clamp-2">{thinking}</span>
           </div>
         </div>
       )}
 
       {/* 操作步骤时间线 */}
       {showSteps && steps.length > 0 && (
-        <div className="px-4 py-3 border-t border-blue-100/30">
+        <div className="px-4 py-3">
           <div className="text-xs font-medium text-muted-foreground mb-2 flex items-center justify-between">
             <span>操作步骤 ({steps.length})</span>
             <span className="text-xs text-muted-foreground">
               {((Date.now() - startTimeRef.current) / 1000).toFixed(0)}s
             </span>
           </div>
-          <div className="space-y-1 max-h-[200px] overflow-y-auto pr-1" style={{ scrollbarWidth: "thin" }}>
+          <div className="space-y-0.5 max-h-[250px] overflow-y-auto pr-1" style={{ scrollbarWidth: "thin" }}>
             {steps.map((step, idx) => (
               <div key={step.id} className="flex items-start gap-2 text-xs group">
                 <div className="flex flex-col items-center mt-0.5">
@@ -481,7 +341,7 @@ export function AutomationTaskCard({ taskId, taskName, siteName }: AutomationTas
                     <div className="w-px h-3 bg-border mt-0.5" />
                   )}
                 </div>
-                <div className="flex-1 min-w-0 pb-1">
+                <div className="flex-1 min-w-0 pb-0.5">
                   <div className="flex items-center gap-1">
                     <span className="text-foreground/80 truncate">{step.content}</span>
                     <span className="text-muted-foreground/60 flex-shrink-0 ml-auto">
@@ -496,36 +356,11 @@ export function AutomationTaskCard({ taskId, taskName, siteName }: AutomationTas
         </div>
       )}
 
-      {/* 当前思考状态 */}
-      {thinking && !isFinished && (
-        <div className="px-4 py-2 border-t border-blue-100/30 bg-yellow-50/30 dark:bg-yellow-900/10">
-          <div className="flex items-start gap-2 text-xs">
-            <Bot className="h-3.5 w-3.5 text-yellow-500 animate-pulse mt-0.5 flex-shrink-0" />
-            <span className="text-yellow-700 dark:text-yellow-400 line-clamp-2">{thinking}</span>
-          </div>
-        </div>
-      )}
-
-      {/* 底部操作栏 */}
-      <div className="px-4 py-2.5 border-t border-blue-100/50 dark:border-blue-900/30 flex items-center gap-2">
-        {!isFinished && (
-          <Button
-            variant={takeoverActive ? "destructive" : "outline"}
-            size="sm"
-            className="h-7 text-xs gap-1"
-            onClick={toggleTakeover}
-            disabled={takeoverLoading || !screenshot}
-          >
-            {takeoverLoading ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : takeoverActive ? (
-              <Hand className="h-3 w-3" />
-            ) : (
-              <Gamepad2 className="h-3 w-3" />
-            )}
-            {takeoverActive ? "释放控制" : "接管操作"}
-          </Button>
-        )}
+      {/* 底部提示 */}
+      <div className="px-4 py-2 border-t border-blue-100/50 dark:border-blue-900/30 flex items-center gap-2">
+        <span className="text-xs text-muted-foreground">
+          {isFinished ? "任务已结束" : "浏览器画面显示在右侧面板 →"}
+        </span>
         <Button
           variant="ghost"
           size="sm"
@@ -533,7 +368,7 @@ export function AutomationTaskCard({ taskId, taskName, siteName }: AutomationTas
           onClick={() => window.open("/automation", "_blank")}
         >
           <ExternalLink className="h-3 w-3" />
-          在新窗口打开
+          详情
         </Button>
       </div>
     </Card>
