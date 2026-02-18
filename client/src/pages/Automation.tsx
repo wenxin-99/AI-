@@ -409,7 +409,12 @@ function AutomationSandbox({ taskId }: { taskId: number }) {
       const endpoint = takeoverActive ? "disable" : "enable";
       const res = await apiFetch(`/tasks/${taskId}/takeover/${endpoint}`, { method: "POST" });
       if (res.success) {
-        setTakeoverActive(!takeoverActive);
+        const newState = !takeoverActive;
+        setTakeoverActive(newState);
+        // 接管后自动聚焦图片元素，以便接收键盘事件
+        if (newState && imgRef.current) {
+          setTimeout(() => imgRef.current?.focus(), 100);
+        }
       } else {
         // 显示错误信息
         const errorMsg = res.error || res.message || "接管失败";
@@ -426,30 +431,61 @@ function AutomationSandbox({ taskId }: { taskId: number }) {
   // 处理接管模式下的点击操作
   const handleTakeoverClick = (e: React.MouseEvent<HTMLImageElement>) => {
     if (!takeoverActive || !imgRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    
     const rect = imgRef.current.getBoundingClientRect();
-    const imgWidth = imgRef.current.naturalWidth || 1920;
-    const imgHeight = imgRef.current.naturalHeight || 1080;
-    const scaleX = imgWidth / rect.width;
-    const scaleY = imgHeight / rect.height;
+    // 浏览器视口固定为 1920x1080（Playwright 启动时设置的窗口大小）
+    const viewportWidth = 1920;
+    const viewportHeight = 1080;
+    const scaleX = viewportWidth / rect.width;
+    const scaleY = viewportHeight / rect.height;
     const x = Math.round((e.clientX - rect.left) * scaleX);
     const y = Math.round((e.clientY - rect.top) * scaleY);
+    
+    console.log(`[Takeover] Click at viewport (${x}, ${y}), display (${e.clientX - rect.left}, ${e.clientY - rect.top}), scale (${scaleX.toFixed(2)}, ${scaleY.toFixed(2)})`);
     sandbox.socket?.emit("takeover_action", { taskId, action: "click", payload: { x, y } });
+    
+    // 点击后保持焦点以便继续接收键盘事件
+    imgRef.current.focus();
   };
 
   // 处理接管模式下的键盘输入
   const handleTakeoverKeyDown = (e: React.KeyboardEvent) => {
     if (!takeoverActive) return;
     e.preventDefault();
-    if (e.key.length === 1) {
+    e.stopPropagation();
+    
+    // 映射浏览器键名到 Playwright 键名
+    const keyMap: Record<string, string> = {
+      'Enter': 'Enter', 'Backspace': 'Backspace', 'Delete': 'Delete',
+      'Tab': 'Tab', 'Escape': 'Escape', 'ArrowUp': 'ArrowUp',
+      'ArrowDown': 'ArrowDown', 'ArrowLeft': 'ArrowLeft', 'ArrowRight': 'ArrowRight',
+      'Home': 'Home', 'End': 'End', 'PageUp': 'PageUp', 'PageDown': 'PageDown',
+    };
+    
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+      // 普通字符输入
+      console.log(`[Takeover] Type: "${e.key}"`);
       sandbox.socket?.emit("takeover_action", { taskId, action: "type", payload: { text: e.key } });
+    } else if (e.ctrlKey || e.metaKey) {
+      // 组合键（如 Ctrl+A, Ctrl+C 等）
+      const combo = `Control+${e.key}`;
+      console.log(`[Takeover] Press combo: ${combo}`);
+      sandbox.socket?.emit("takeover_action", { taskId, action: "press", payload: { key: combo } });
     } else {
-      sandbox.socket?.emit("takeover_action", { taskId, action: "press", payload: { key: e.key } });
+      // 特殊键
+      const mappedKey = keyMap[e.key] || e.key;
+      console.log(`[Takeover] Press: ${mappedKey}`);
+      sandbox.socket?.emit("takeover_action", { taskId, action: "press", payload: { key: mappedKey } });
     }
   };
 
   // 处理接管模式下的滚动
   const handleTakeoverWheel = (e: React.WheelEvent) => {
     if (!takeoverActive) return;
+    e.preventDefault();
+    console.log(`[Takeover] Scroll: deltaY=${e.deltaY}`);
     sandbox.socket?.emit("takeover_action", { taskId, action: "scroll", payload: { deltaX: e.deltaX, deltaY: e.deltaY } });
   };
 
@@ -510,9 +546,10 @@ function AutomationSandbox({ taskId }: { taskId: number }) {
                   className={`max-w-full max-h-full object-contain ${takeoverActive ? "cursor-crosshair" : ""}`}
                   onClick={handleTakeoverClick}
                   onWheel={handleTakeoverWheel}
-                  tabIndex={takeoverActive ? 0 : undefined}
+                  tabIndex={0}
                   onKeyDown={handleTakeoverKeyDown}
-                  style={takeoverActive ? { outline: "2px solid #f97316", outlineOffset: "2px" } : undefined}
+                  onMouseDown={(e) => { if (takeoverActive) { e.preventDefault(); imgRef.current?.focus(); } }}
+                  style={takeoverActive ? { outline: "3px solid #f97316", outlineOffset: "2px", userSelect: "none" as const } : { outline: "none" }}
                 />
               ) : (
                 <div className="text-center text-gray-400 space-y-2">

@@ -161,6 +161,7 @@ async function extractPageContext(page: Page): Promise<PageContext> {
     const elements: Array<{
       index: number; tag: string; type?: string;
       text: string; placeholder?: string; selector: string;
+      href?: string;
     }> = [];
     
     const selectors = [
@@ -170,6 +171,68 @@ async function extractPageContext(page: Page): Promise<PageContext> {
     
     let index = 0;
     const seen = new Set<Element>();
+    
+    // 辅助函数：生成可靠的唯一选择器
+    function generateUniqueSelector(el: Element, tag: string): string {
+      // 1. 有 id 直接用
+      if (el.id) return `#${el.id}`;
+      
+      // 2. 有 name 属性
+      const name = el.getAttribute("name");
+      if (name) return `${tag}[name="${name}"]`;
+      
+      // 3. 有 href 属性（链接）- 用 href 精确匹配
+      const href = el.getAttribute("href");
+      if (href && href !== "#" && href !== "javascript:void(0)") {
+        return `${tag}[href="${href}"]`;
+      }
+      
+      // 4. 有 data-* 属性
+      for (const attr of el.attributes) {
+        if (attr.name.startsWith("data-") && attr.value) {
+          return `${tag}[${attr.name}="${attr.value}"]`;
+        }
+      }
+      
+      // 5. 用 class 组合 + nth-child 确保唯一性
+      if (el.className && typeof el.className === "string") {
+        const cls = el.className.split(" ").filter(c => c && !c.includes(":") && !c.includes("(")).slice(0, 3).join(".");
+        if (cls) {
+          const fullSelector = `${tag}.${cls}`;
+          const matches = document.querySelectorAll(fullSelector);
+          if (matches.length === 1) return fullSelector;
+          // 如果有多个匹配，用 nth-of-type 区分
+          const siblings = Array.from(matches);
+          const idx = siblings.indexOf(el);
+          if (idx >= 0) {
+            // 使用 :nth-child 基于父元素
+            const parent = el.parentElement;
+            if (parent) {
+              const childIndex = Array.from(parent.children).indexOf(el) + 1;
+              return `${tag}.${cls}:nth-child(${childIndex})`;
+            }
+          }
+          return fullSelector; // 回退
+        }
+      }
+      
+      // 6. 基于父元素的 nth-child
+      const parent = el.parentElement;
+      if (parent) {
+        const childIndex = Array.from(parent.children).filter(c => c.tagName === el.tagName).indexOf(el) + 1;
+        if (parent.id) {
+          return `#${parent.id} > ${tag}:nth-of-type(${childIndex})`;
+        }
+        if (parent.className && typeof parent.className === "string") {
+          const parentCls = parent.className.split(" ").filter(c => c && !c.includes(":")).slice(0, 2).join(".");
+          if (parentCls) {
+            return `${parent.tagName.toLowerCase()}.${parentCls} > ${tag}:nth-of-type(${childIndex})`;
+          }
+        }
+      }
+      
+      return `${tag}:nth-of-type(${index + 1})`;
+    }
     
     for (const sel of selectors) {
       document.querySelectorAll(sel).forEach((el) => {
@@ -185,25 +248,15 @@ async function extractPageContext(page: Page): Promise<PageContext> {
         const text = (el.textContent || "").trim().substring(0, 100);
         const type = el.getAttribute("type") || undefined;
         const placeholder = el.getAttribute("placeholder") || undefined;
+        const href = (el as HTMLAnchorElement).href || undefined;
         
-        // 生成唯一选择器
-        let selector = "";
-        if (el.id) {
-          selector = `#${el.id}`;
-        } else if (el.getAttribute("name")) {
-          selector = `${tag}[name="${el.getAttribute("name")}"]`;
-        } else if (el.className && typeof el.className === "string") {
-          const cls = el.className.split(" ").filter(c => c && !c.includes(":")).slice(0, 2).join(".");
-          selector = cls ? `${tag}.${cls}` : `${tag}:nth-of-type(${index + 1})`;
-        } else {
-          selector = `${tag}:nth-of-type(${index + 1})`;
-        }
+        const selector = generateUniqueSelector(el, tag);
         
-        elements.push({ index: index++, tag, type, text, placeholder, selector });
+        elements.push({ index: index++, tag, type, text, placeholder, selector, href });
       });
     }
     
-    return elements.slice(0, 50); // 限制最多 50 个元素
+    return elements.slice(0, 60); // 限制最多 60 个元素
   });
   
   return { url, title, visibleText, interactiveElements };
@@ -266,14 +319,16 @@ ${task.targetUrls ? `目标URL列表：${task.targetUrls}` : ""}
 你可以使用以下工具：
 1. navigate(url) - 导航到指定 URL
 2. click(selector) - 点击页面元素（使用 CSS 选择器字符串）
-3. type(selector, text) - 在输入框中输入文字
-4. scroll(direction, distance) - 滚动页面，direction 为 "down" 或 "up"
-5. wait(seconds) - 等待指定秒数
-6. screenshot() - 截取当前页面截图
-7. captcha(imageSelector, inputSelector) - 识别并填入验证码
-8. generate_content(topic, type) - 使用 AI 生成帖子/回复内容
-9. submit() - 提交当前表单（点击提交按钮）
-10. done(summary) - 任务完成，提供摘要
+3. click_text(text) - 通过元素的可见文本内容点击（适用于链接和按钮，如 "发帖"、"提交"）
+4. click_index(index) - 通过元素列表中的索引号点击（如 [0]、[1]）
+5. type(selector, text) - 在输入框中输入文字
+6. scroll(direction, distance) - 滚动页面，direction 为 "down" 或 "up"
+7. wait(seconds) - 等待指定秒数
+8. screenshot() - 截取当前页面截图
+9. captcha(imageSelector, inputSelector) - 识别并填入验证码
+10. generate_content(topic, type) - 使用 AI 生成帖子/回复内容
+11. submit() - 提交当前表单（点击提交按钮）
+12. done(summary) - 任务完成，提供摘要
 
 请根据当前页面状态决定下一步操作。以 JSON 格式回答：
 {
@@ -284,10 +339,12 @@ ${task.targetUrls ? `目标URL列表：${task.targetUrls}` : ""}
 
 重要规则：
 - 每次只执行一个操作
-- selector 参数必须是有效的 CSS 选择器字符串
+- 优先使用 click_text 或 click_index，而不是 click(selector)，因为文本和索引更可靠
+- 如果使用 click(selector)，selector 必须是元素列表中提供的确切选择器，不要自己编造
 - 如果看到验证码，优先处理验证码
 - 如果登录失败，最多重试 3 次
 - 如果页面没有变化，尝试不同的操作
+- 如果 click 失败，尝试用 navigate 直接跳转到目标 URL
 - 发帖/回复内容必须自然、有价值，不能是垃圾内容
 - 完成所有操作后调用 done() 工具`;
 
@@ -299,9 +356,12 @@ URL: ${pageContext.url}
 ${pageContext.visibleText.substring(0, 2000)}
 
 可交互元素列表：
-${pageContext.interactiveElements.map(el => 
-  `[${el.index}] <${el.tag}${el.type ? ` type="${el.type}"` : ""}> ${el.text || el.placeholder || ""} → selector: "${el.selector}"`
-).join("\n")}
+${pageContext.interactiveElements.map(el => {
+  let desc = `[${el.index}] <${el.tag}${el.type ? ` type="${el.type}"` : ""}> ${el.text || el.placeholder || ""}`;
+  if ((el as any).href) desc += ` (href: ${(el as any).href})`;
+  desc += ` \u2192 selector: "${el.selector}"`;
+  return desc;
+}).join("\n")}
 
 请决定下一步操作：`;
 
@@ -617,11 +677,65 @@ export async function executeAutomationTask(taskId: number): Promise<void> {
             if (!selector || typeof selector !== "string") {
               throw new Error("click 需要有效的 CSS 选择器字符串");
             }
+            // 先检查元素是否存在，避免 30 秒超时
+            const clickEl = await page.$(selector);
+            if (!clickEl) {
+              throw new Error(`元素不存在: ${selector}，请使用 click_text 或 click_index 代替`);
+            }
             await humanClick(page, selector);
             await humanDelay(500, 1500);
             screenshot = await captureAndEmit(page, taskId, `点击 ${selector}`);
             await recordStep(taskId, stepNumber, "click", `点击元素: ${selector}`, {
               selector, screenshotBase64: screenshot, durationMs: Date.now() - actionStartTime,
+            });
+            break;
+          }
+          
+          case "click_text": {
+            const text = action.params.text;
+            if (!text || typeof text !== "string") {
+              throw new Error("click_text 需要有效的文本参数");
+            }
+            // 使用 Playwright 的文本定位功能
+            const textLocator = page.getByRole('link', { name: text }).or(
+              page.getByRole('button', { name: text })
+            ).or(
+              page.locator(`text="${text}"`)
+            );
+            const textEl = await textLocator.first();
+            await textEl.scrollIntoViewIfNeeded();
+            await humanDelay(200, 500);
+            await textEl.click({ timeout: 10000 });
+            await humanDelay(500, 1500);
+            screenshot = await captureAndEmit(page, taskId, `点击文本 "${text}"`);
+            await recordStep(taskId, stepNumber, "click", `点击文本: "${text}"`, {
+              screenshotBase64: screenshot, durationMs: Date.now() - actionStartTime,
+            });
+            break;
+          }
+          
+          case "click_index": {
+            const idx = action.params.index;
+            if (typeof idx !== "number" || idx < 0) {
+              throw new Error("click_index 需要有效的索引号");
+            }
+            // 从上一次提取的元素列表中找到对应元素
+            const targetEl = pageContext.interactiveElements.find(e => e.index === idx);
+            if (!targetEl) {
+              throw new Error(`索引 ${idx} 不存在于元素列表中`);
+            }
+            // 先检查元素是否存在
+            const indexEl = await page.$(targetEl.selector);
+            if (!indexEl) {
+              throw new Error(`索引 ${idx} 对应的元素不存在: ${targetEl.selector}`);
+            }
+            await indexEl.scrollIntoViewIfNeeded();
+            await humanDelay(200, 500);
+            await indexEl.click();
+            await humanDelay(500, 1500);
+            screenshot = await captureAndEmit(page, taskId, `点击元素 [${idx}] ${targetEl.text}`);
+            await recordStep(taskId, stepNumber, "click", `点击元素 [${idx}]: ${targetEl.text} (${targetEl.selector})`, {
+              selector: targetEl.selector, screenshotBase64: screenshot, durationMs: Date.now() - actionStartTime,
             });
             break;
           }
