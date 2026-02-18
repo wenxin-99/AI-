@@ -55,6 +55,9 @@ interface PageContext {
     text: string;
     placeholder?: string;
     selector: string;
+    href?: string;
+    options?: string[];
+    selectedValue?: string;
   }>;
 }
 
@@ -63,6 +66,7 @@ interface PageContext {
 
 interface KnownSiteConfig {
   loginUrlPattern: RegExp;
+  loginUrl?: string;
   usernameSelector: string;
   passwordSelector: string;
   submitSelector: string;
@@ -73,6 +77,7 @@ interface KnownSiteConfig {
 const KNOWN_SITES: KnownSiteConfig[] = [
   {
     loginUrlPattern: /mpsboring\.com/i,
+    loginUrl: 'https://mpsboring.com/login',
     usernameSelector: 'input[name="email"]',
     passwordSelector: 'input[name="password"]',
     submitSelector: 'button.login-submit-btn',
@@ -252,7 +257,18 @@ async function extractPageContext(page: Page): Promise<PageContext> {
         
         const selector = generateUniqueSelector(el, tag);
         
-        elements.push({ index: index++, tag, type, text, placeholder, selector, href });
+        // 对于 select 元素，提取其选项列表和当前选中值
+        let options: string[] | undefined;
+        let selectedValue: string | undefined;
+        if (tag === 'select') {
+          const selectEl = el as HTMLSelectElement;
+          options = Array.from(selectEl.options).map(opt => opt.text.trim()).filter(t => t);
+          const selectedOpt = selectEl.options[selectEl.selectedIndex];
+          if (selectedOpt && selectedOpt.value) {
+            selectedValue = selectedOpt.text.trim();
+          }
+        }
+        elements.push({ index: index++, tag, type, text, placeholder, selector, href, options, selectedValue });
       });
     }
     
@@ -301,7 +317,8 @@ async function agentDecide(
   task: AutomationTask,
   pageContext: PageContext,
   history: Array<{ role: string; content: string }>,
-  stepNumber: number
+  stepNumber: number,
+  account: { siteUrl: string; loginUrl?: string | null; [key: string]: any }
 ): Promise<AgentAction> {
   const apiKey = ENV.forgeApiKey || process.env.OPENAI_API_KEY || "";
   const apiUrl = getLlmApiUrl();
@@ -328,7 +345,8 @@ ${task.targetUrls ? `目标URL列表：${task.targetUrls}` : ""}
 9. captcha(imageSelector, inputSelector) - 识别并填入验证码
 10. generate_content(topic, type) - 使用 AI 生成帖子/回复内容
 11. submit() - 提交当前表单（点击提交按钮）
-12. done(summary) - 任务完成，提供摘要
+12. select_option(selector, label) - 选择下拉框选项，selector 是 <select> 元素的 CSS 选择器，label 是选项的可见文本
+13. done(summary) - 任务完成，提供摘要
 
 请根据当前页面状态决定下一步操作。以 JSON 格式回答：
 {
@@ -350,7 +368,12 @@ ${task.targetUrls ? `目标URL列表：${task.targetUrls}` : ""}
 - 如果页面没有变化，尝试不同的操作
 - 如果 click 失败，尝试用 navigate 直接跳转到目标网站的相关页面（如 ${account.siteUrl}/new 发帖页）
 - 发帖/回复内容必须自然、有价值，不能是垃圾内容
-- 完成所有操作后调用 done() 工具`;
+- 完成所有操作后调用 done() 工具
+- 对于 <select> 下拉框，必须使用 select_option 工具，不要用 click 或 click_text
+- type 工具只能用于 input 和 textarea，不能用于 select
+- 【重要】如果 select 元素已经显示 [selected: xxx]，说明该选项已经被成功选中，不需要再次选择
+- 【重要】绝对不要连续重复同一个操作超过 2 次，如果同一操作已经执行过两次，必须尝试不同的方法或继续下一步
+- 发帖流程：先选择版块(select_option) → 填写标题(type) → 填写内容(type) → 提交(submit)，每步完成后立即进入下一步`;
 
   const userMessage = `当前页面状态（第 ${stepNumber} 步）：
 URL: ${pageContext.url}
@@ -362,7 +385,9 @@ ${pageContext.visibleText.substring(0, 2000)}
 可交互元素列表：
 ${pageContext.interactiveElements.map(el => {
   let desc = `[${el.index}] <${el.tag}${el.type ? ` type="${el.type}"` : ""}> ${el.text || el.placeholder || ""}`;
-  if ((el as any).href) desc += ` (href: ${(el as any).href})`;
+  if (el.href) desc += ` (href: ${el.href})`;
+  if (el.options && el.options.length > 0) desc += ` [options: ${el.options.join(', ')}]`;
+  if (el.selectedValue) desc += ` [selected: ${el.selectedValue}]`;
   desc += ` \u2192 selector: "${el.selector}"`;
   return desc;
 }).join("\n")}
@@ -478,13 +503,35 @@ async function recordStep(
   }> = {}
 ): Promise<void> {
   const db = await getDb();
-  await db.insert(automationTaskSteps).values({
-    taskId,
-    stepNumber,
-    type: type as any,
-    content,
-    ...extra,
-  });
+  // 限制 screenshotBase64 大小，避免数据库写入失败
+  const safeExtra = { ...extra };
+  if (safeExtra.screenshotBase64 && safeExtra.screenshotBase64.length > 500000) {
+    safeExtra.screenshotBase64 = safeExtra.screenshotBase64.substring(0, 500000);
+  }
+  try {
+    await db.insert(automationTaskSteps).values({
+      taskId,
+      stepNumber,
+      type: type as any,
+      content,
+      ...safeExtra,
+    });
+  } catch (dbErr: any) {
+    console.error(`[AutomationService] Failed to record step ${stepNumber}: ${dbErr.message}`);
+    // 如果写入失败，尝试不带截图写入
+    try {
+      const { screenshotBase64, ...restExtra } = safeExtra;
+      await db.insert(automationTaskSteps).values({
+        taskId,
+        stepNumber,
+        type: type as any,
+        content,
+        ...restExtra,
+      });
+    } catch (dbErr2: any) {
+      console.error(`[AutomationService] Failed to record step ${stepNumber} even without screenshot: ${dbErr2.message}`);
+    }
+  }
   
   // 通过 Socket.io 推送步骤
   emitAgentStep(taskId, type, content, stepNumber);
@@ -548,7 +595,16 @@ export async function executeAutomationTask(taskId: number): Promise<void> {
     
     // 导航到登录页
     stepNumber++;
-    const loginUrl = account.loginUrl || `${account.siteUrl}/login`;
+    // 优先使用 KNOWN_SITES 配置的 loginUrl，其次使用数据库值
+    const knownSiteForLogin = findKnownSiteConfig(account.siteUrl);
+    let loginUrl: string;
+    if (knownSiteForLogin && knownSiteForLogin.loginUrl) {
+      loginUrl = knownSiteForLogin.loginUrl;
+    } else if (account.loginUrl && !account.loginUrl.includes('member.php')) {
+      loginUrl = account.loginUrl;
+    } else {
+      loginUrl = `${account.siteUrl}/login`;
+    }
     console.log(`[AutomationService] Navigating to login URL: ${loginUrl}`);
     emitBrowserLoading(taskId, loginUrl);
     
@@ -570,7 +626,7 @@ export async function executeAutomationTask(taskId: number): Promise<void> {
     emitBrowserNavigate(taskId, loginUrl);
     
     // 使用 Agent 完成登录
-    const loginSuccess = await performLogin(page, account, taskId, stepNumber);
+    const loginSuccess = await performLogin(page, account, taskId, stepNumber, loginUrl);
     stepNumber += 5; // 登录过程大约消耗 5 步
     
     if (!loginSuccess) {
@@ -636,7 +692,7 @@ export async function executeAutomationTask(taskId: number): Promise<void> {
       const startTime = Date.now();
       let action: AgentAction;
       try {
-        action = await agentDecide(task, pageContext, history, stepNumber);
+        action = await agentDecide(task, pageContext, history, stepNumber, account);
         consecutiveErrors = 0; // 重置错误计数
       } catch (llmError: any) {
         console.error(`[AutomationService] LLM call failed:`, llmError.message);
@@ -745,9 +801,20 @@ export async function executeAutomationTask(taskId: number): Promise<void> {
             if (!indexEl) {
               throw new Error(`索引 ${idx} 对应的元素不存在: ${targetEl.selector}`);
             }
-            await indexEl.scrollIntoViewIfNeeded();
-            await humanDelay(200, 500);
-            await indexEl.click();
+            try {
+              await indexEl.scrollIntoViewIfNeeded({ timeout: 3000 });
+              await humanDelay(200, 500);
+              await indexEl.click({ timeout: 5000 });
+            } catch (clickErr: any) {
+              console.log(`[AutomationService] Normal click failed for index ${idx}, trying force click: ${clickErr.message}`);
+              // 如果是链接元素，尝试直接导航
+              if (targetEl.href && targetEl.tag === 'a') {
+                await page.goto(targetEl.href, { waitUntil: 'domcontentloaded', timeout: 15000 });
+              } else {
+                // 尝试 force click
+                await indexEl.click({ force: true, timeout: 5000 });
+              }
+            }
             await humanDelay(500, 1500);
             screenshot = await captureAndEmit(page, taskId, `点击元素 [${idx}] ${targetEl.text}`);
             await recordStep(taskId, stepNumber, "click", `点击元素 [${idx}]: ${targetEl.text} (${targetEl.selector})`, {
@@ -764,7 +831,17 @@ export async function executeAutomationTask(taskId: number): Promise<void> {
             if (!text || typeof text !== "string") {
               throw new Error("type 需要有效的文本内容");
             }
-            await humanType(page, selector, text);
+            // 检查是否是 select 元素，如果是则使用 selectOption
+            const isSelect = await page.evaluate((sel: string) => {
+              const el = document.querySelector(sel);
+              return el ? el.tagName.toLowerCase() === 'select' : false;
+            }, selector);
+            if (isSelect) {
+              await page.selectOption(selector, { label: text });
+              await humanDelay(500, 1000);
+            } else {
+              await humanType(page, selector, text);
+            }
             screenshot = await captureAndEmit(page, taskId, `输入文字`);
             await recordStep(taskId, stepNumber, "input", `输入文字到 ${selector}: "${text.substring(0, 50)}..."`, {
               selector, inputText: text, screenshotBase64: screenshot, durationMs: Date.now() - actionStartTime,
@@ -863,6 +940,51 @@ export async function executeAutomationTask(taskId: number): Promise<void> {
             await recordStep(taskId, stepNumber, "post", 
               submitted ? "表单已提交" : "未找到提交按钮", {
               screenshotBase64: screenshot, success: submitted, durationMs: Date.now() - actionStartTime,
+            });
+            break;
+          }
+          
+          case "select_option": {
+            const { selector: selSelector, value: selValue, label: selLabel } = action.params;
+            console.log(`[AutomationService] select_option: selector=${selSelector}, value=${selValue}, label=${selLabel}`);
+            if (!selSelector || typeof selSelector !== "string") {
+              throw new Error("select_option 需要有效的 CSS 选择器");
+            }
+            const selectEl = await page.$(selSelector);
+            if (!selectEl) {
+              throw new Error(`下拉框不存在: ${selSelector}`);
+            }
+            // 支持按 value 或 label 选择
+            try {
+              if (selValue) {
+                await page.selectOption(selSelector, { value: String(selValue) });
+              } else if (selLabel) {
+                await page.selectOption(selSelector, { label: String(selLabel) });
+              } else {
+                throw new Error("select_option 需要 value 或 label 参数");
+              }
+              console.log(`[AutomationService] select_option succeeded for ${selSelector}`);
+            } catch (selErr: any) {
+              console.error(`[AutomationService] select_option failed: ${selErr.message}`);
+              // 尝试通过 JavaScript 直接设置
+              console.log(`[AutomationService] Trying JS fallback for select_option`);
+              await page.evaluate(({ sel, val, lbl }: { sel: string; val?: string; lbl?: string }) => {
+                const selectElement = document.querySelector(sel) as HTMLSelectElement;
+                if (!selectElement) return;
+                if (val) {
+                  selectElement.value = val;
+                } else if (lbl) {
+                  const option = Array.from(selectElement.options).find(o => o.text.trim() === lbl);
+                  if (option) selectElement.value = option.value;
+                }
+                selectElement.dispatchEvent(new Event('change', { bubbles: true }));
+              }, { sel: selSelector, val: selValue, lbl: selLabel });
+              console.log(`[AutomationService] JS fallback for select_option completed`);
+            }
+            await humanDelay(500, 1000);
+            screenshot = await captureAndEmit(page, taskId, `选择选项 ${selLabel || selValue}`);
+            await recordStep(taskId, stepNumber, "select", `选择下拉框 ${selSelector}: ${selLabel || selValue}`, {
+              selector: selSelector, screenshotBase64: screenshot, durationMs: Date.now() - actionStartTime,
             });
             break;
           }
@@ -976,7 +1098,8 @@ async function performLogin(
   page: Page,
   account: SiteAccount,
   taskId: number,
-  startStep: number
+  startStep: number,
+  loginUrl?: string
 ): Promise<boolean> {
   let step = startStep;
   
@@ -1246,7 +1369,8 @@ ${pageContext.interactiveElements.map(el =>
     
     const hasLogout = await page.$('a:has-text("退出"), a:has-text("登出"), a:has-text("注销"), a:has-text("Logout"), a:has-text("Sign out")');
     
-    if (currentUrl !== account.loginUrl || hasLogout) {
+    const effectiveLoginUrl = loginUrl || account.loginUrl || '';
+    if (currentUrl !== effectiveLoginUrl || hasLogout) {
       console.log(`[AutomationService] Login appears successful`);
       return true;
     }
