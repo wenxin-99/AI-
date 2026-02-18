@@ -123,6 +123,18 @@ export function initSocketIO(httpServer: HttpServer): Server {
       socket.leave(room);
       console.log(`[SocketIO] Client ${socket.id} left room ${room}`);
     });
+    
+    // 用户接管操作
+    socket.on("takeover_action", async (data: { taskId: number; action: string; payload: any }) => {
+      console.log(`[SocketIO] Takeover action from ${socket.id}:`, data.action);
+      // Forward to automation service
+      const { handleTakeoverAction } = await import("./automationService");
+      try {
+        await handleTakeoverAction(data.taskId, data.action, data.payload);
+      } catch (err: any) {
+        socket.emit("takeover_error", { taskId: data.taskId, error: err.message });
+      }
+    });
 
     socket.on("disconnect", (reason) => {
       console.log(`[SocketIO] Client disconnected: ${socket.id} (${reason})`);
@@ -307,6 +319,18 @@ export function emitTaskProgress(
     taskId,
     timestamp: Date.now(),
     payload: { progress, currentStep },
+  });
+}
+
+/**
+ * 向特定任务广播接管模式状态
+ */
+export function emitTakeoverStatus(taskId: number, active: boolean, message?: string): void {
+  emitSandboxEvent({
+    type: "takeover_status",
+    taskId,
+    timestamp: Date.now(),
+    payload: { active, message: message || "" },
   });
 }
 

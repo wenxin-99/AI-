@@ -2,7 +2,7 @@
  * useSandboxSocket - Socket.io React Hook
  * 
  * 管理与后端 Socket.io 的连接，接收沙箱事件并维护状态。
- * 为沙箱面板的三个 Tab（浏览器、代码、终端）提供实时数据。
+ * 为沙箱面板的三个 Tab（浏览器、终端、思考过程）提供实时数据。
  */
 import { useState, useEffect, useCallback, useRef } from "react";
 import { io, Socket } from "socket.io-client";
@@ -50,18 +50,27 @@ export interface TerminalLine {
   type: "command" | "output";
 }
 
-export interface TerminalState {
-  lines: TerminalLine[];
+export interface AgentStepEvent {
+  timestamp: number;
+  payload: {
+    stepType: string;
+    content: string;
+    stepNumber: number;
+  };
 }
 
 export interface SandboxState {
   browser: BrowserState;
   code: CodeState;
-  terminal: TerminalState;
+  terminal: TerminalLine[];
   isConnected: boolean;
   activeTab: "browser" | "code" | "terminal";
   taskStatus: string;
   taskProgress: number;
+  thinking: string;
+  steps: AgentStepEvent[];
+  currentStep: string;
+  progress: number;
 }
 
 // ============ Hook ============
@@ -85,19 +94,24 @@ export function useSandboxSocket(taskId: number | null) {
     history: [],
   });
 
-  const [terminal, setTerminal] = useState<TerminalState>({
-    lines: [
-      {
-        content: "\x1b[32m$ \x1b[0m研究代理沙箱终端已就绪\r\n",
-        timestamp: Date.now(),
-        type: "output",
-      },
-    ],
-  });
+  // terminal 直接作为 TerminalLine[] 数组，方便 Automation.tsx 使用 .length 和 .map()
+  const [terminal, setTerminal] = useState<TerminalLine[]>([
+    {
+      content: "\x1b[32m$ \x1b[0m自动化沙箱终端已就绪\r\n",
+      timestamp: Date.now(),
+      type: "output",
+    },
+  ]);
 
   const [activeTab, setActiveTab] = useState<"browser" | "code" | "terminal">("browser");
   const [taskStatus, setTaskStatus] = useState("");
   const [taskProgress, setTaskProgress] = useState(0);
+  
+  // Agent 思考过程和步骤
+  const [thinking, setThinking] = useState("");
+  const [steps, setSteps] = useState<AgentStepEvent[]>([]);
+  const [currentStep, setCurrentStep] = useState("");
+  const [progress, setProgress] = useState(0);
 
   // 处理沙箱事件
   const handleSandboxEvent = useCallback((event: SandboxEvent) => {
@@ -153,55 +167,66 @@ export function useSandboxSocket(taskId: number | null) {
             },
           ],
         }));
-        // 如果是报告，自动切换到代码面板
         if (event.payload.filename === "research_report.md") {
           setActiveTab("code");
         }
         break;
 
       case "terminal_command":
-        setTerminal((prev) => ({
-          lines: [
-            ...prev.lines,
-            {
-              content: `\x1b[36m$ ${event.payload.command}\x1b[0m\r\n`,
-              timestamp: event.timestamp,
-              type: "command",
-            },
-          ],
-        }));
+        setTerminal((prev) => [
+          ...prev,
+          {
+            content: `\x1b[36m$ ${event.payload.command}\x1b[0m\r\n`,
+            timestamp: event.timestamp,
+            type: "command" as const,
+          },
+        ]);
         setActiveTab("terminal");
         break;
 
       case "terminal_output":
-        setTerminal((prev) => ({
-          lines: [
-            ...prev.lines,
-            {
-              content: event.payload.output,
-              timestamp: event.timestamp,
-              type: "output",
-            },
-          ],
-        }));
+        setTerminal((prev) => [
+          ...prev,
+          {
+            content: event.payload.output,
+            timestamp: event.timestamp,
+            type: "output" as const,
+          },
+        ]);
         break;
 
       case "agent_thinking":
+        setThinking(event.payload.thought || "");
         // 终端也显示思考状态
-        setTerminal((prev) => ({
-          lines: [
-            ...prev.lines,
-            {
-              content: `\x1b[33m[思考]\x1b[0m ${event.payload.thought.substring(0, 200)}...\r\n`,
-              timestamp: event.timestamp,
-              type: "output",
-            },
-          ],
-        }));
+        setTerminal((prev) => [
+          ...prev,
+          {
+            content: `\x1b[33m[思考]\x1b[0m ${(event.payload.thought || "").substring(0, 200)}...\r\n`,
+            timestamp: event.timestamp,
+            type: "output" as const,
+          },
+        ]);
         break;
 
       case "agent_searching":
         setActiveTab("browser");
+        break;
+
+      case "agent_step":
+        // 记录 Agent 步骤
+        setSteps((prev) => [
+          ...prev,
+          {
+            timestamp: event.timestamp,
+            payload: {
+              stepType: event.payload.stepType || "step",
+              content: event.payload.content || "",
+              stepNumber: event.payload.stepNumber || 0,
+            },
+          },
+        ]);
+        // 清除当前思考状态（步骤完成了）
+        setThinking("");
         break;
 
       case "task_status":
@@ -210,6 +235,10 @@ export function useSandboxSocket(taskId: number | null) {
 
       case "task_progress":
         setTaskProgress(event.payload.progress);
+        setProgress(event.payload.progress);
+        if (event.payload.currentStep) {
+          setCurrentStep(event.payload.currentStep);
+        }
         break;
     }
   }, []);
@@ -267,5 +296,11 @@ export function useSandboxSocket(taskId: number | null) {
     setActiveTab,
     taskStatus,
     taskProgress,
+    // 新增：Agent 思考过程和步骤
+    thinking,
+    steps,
+    currentStep,
+    progress,
+    socket: socketRef.current,
   };
 }

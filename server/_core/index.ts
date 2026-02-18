@@ -348,6 +348,28 @@ async function startServer() {
     console.error("[SSH] Failed to load router:", e.message);
   }
   if (sshRouter) app.use("/api/ssh", sshRouter);
+  // 网站全自动交互沙箱 API
+  let automationRouter: any;
+  try {
+    automationRouter = (await import("./automationRouter")).default;
+    console.log("[Automation] Router loaded successfully");
+  } catch (e: any) {
+    console.error("[Automation] Failed to load router:", e.message);
+  }
+  if (automationRouter) app.use("/api/automation", automationRouter);
+  // 定时任务系统 API
+  let scheduledTaskRouter: any;
+  let initScheduledTasksFn: any;
+  try {
+    const stModule = await import("../api/scheduledTaskRouter");
+    scheduledTaskRouter = stModule.default;
+    initScheduledTasksFn = stModule.initScheduledTasks;
+    console.log("[ScheduledTask] Router loaded successfully");
+  } catch (e: any) {
+    console.error("[ScheduledTask] Failed to load router:", e.message);
+  }
+  if (scheduledTaskRouter) app.use("/api/scheduled-tasks", scheduledTaskRouter);
+  if (initScheduledTasksFn) initScheduledTasksFn().catch((e: any) => console.error("[ScheduledTask] Init failed:", e));
   
   // File upload API
   const uploadRouter = (await import("../api/upload")).default;
