@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { trpc } from "@/lib/trpc";
 import { Link } from "wouter";
-import { Loader2, Send, Sparkles, Trash2, Plus, Download, Paperclip, Image as ImageIcon, Mic, Headphones, FileText, Bot, Copy, RotateCcw, Tag, Settings, X, Menu, ChevronLeft, ChevronRight, Printer, FileDown, Brain, FileSpreadsheet, File, FileType, MoreHorizontal } from "lucide-react";
+import { Loader2, Send, Sparkles, Trash2, Plus, Download, Paperclip, Image as ImageIcon, Mic, Headphones, FileText, Bot, Copy, RotateCcw, Tag, Settings, X, Menu, ChevronLeft, ChevronRight, Printer, FileDown, Brain, FileSpreadsheet, File, FileType, MoreHorizontal, Volume2, Square, StopCircle } from "lucide-react";
 import { formatFileSize } from "@/lib/formatFileSize";
 import { FishCoinBalance } from "@/components/FishCoinBalance";
 import { ThinkingAnimation } from "@/components/ThinkingAnimation";
@@ -34,6 +34,7 @@ import { VideoGenerationDialog } from "@/components/VideoGenerationDialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { VideoConfirmDialog } from "@/components/VideoConfirmDialog";
 import { VideoTaskCard } from "@/components/VideoTaskCard";
+import { AutomationTaskCard } from "@/components/AutomationTaskCard";
 import { ResearchTaskCard } from "@/components/ResearchTaskCard";
 import { ResearchConfirmCard } from "@/components/ResearchConfirmCard";
 import { VideoConfirmCard } from "@/components/VideoConfirmCard";
@@ -95,6 +96,9 @@ export default function Chat() {
   const [uploadedImages, setUploadedImages] = useState<Array<{ url: string; name: string; progress?: number }>>([]);
   const [uploadedFiles, setUploadedFiles] = useState<Array<{ url: string; name: string; size: number; progress?: number; error?: string; file?: File; id?: string }>>([]);
   const [voiceDialogOpen, setVoiceDialogOpen] = useState(false);
+  const [playingTtsIndex, setPlayingTtsIndex] = useState<number | null>(null);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsAbortRef = useRef<AbortController | null>(null);
   const [isStreamingMessage, setIsStreamingMessage] = useState(false);
   const [isResearchMode, setIsResearchMode] = useState(false);
   const [isStartingResearch, setIsStartingResearch] = useState(false);
@@ -105,7 +109,7 @@ export default function Chat() {
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxImages, setLightboxImages] = useState<Array<{ url: string; name: string }>>([]);
   const [lightboxIndex, setLightboxIndex] = useState(0);
-  const { sendMessage: sendStreamMessage, isStreaming, streamedContent, reset: resetStream } = useChatStream();
+  const { sendMessage: sendStreamMessage, isStreaming, streamedContent, reset: resetStream, abort: abortStream } = useChatStream();
   const { steps: simulatedSteps, startThinking, onStreamStart, onStreamComplete, reset: resetSimulatedThinking } = useSimulatedThinking();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -476,6 +480,93 @@ export default function Chat() {
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
   }, [voiceDialogOpen]);
+
+  // === TTS 语音播放处理 ===
+  const handleTtsPlay = async (msgContent: string, msgIndex: number) => {
+    // 如果正在播放同一条消息，停止播放
+    if (playingTtsIndex === msgIndex) {
+      if (ttsAbortRef.current) {
+        ttsAbortRef.current.abort();
+        ttsAbortRef.current = null;
+      }
+      if (ttsAudioRef.current) {
+        ttsAudioRef.current.pause();
+        ttsAudioRef.current.currentTime = 0;
+        ttsAudioRef.current = null;
+      }
+      setPlayingTtsIndex(null);
+      return;
+    }
+    // 停止之前的播放
+    if (ttsAbortRef.current) {
+      ttsAbortRef.current.abort();
+    }
+    if (ttsAudioRef.current) {
+      ttsAudioRef.current.pause();
+      ttsAudioRef.current = null;
+    }
+    setPlayingTtsIndex(msgIndex);
+    const abortController = new AbortController();
+    ttsAbortRef.current = abortController;
+    try {
+      // 清理markdown格式，只保留纯文本
+      const cleanText = msgContent
+        .replace(/!\[[^\]]*\]\([^)]+\)/g, '') // 移除图片
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // 链接保留文字
+        .replace(/[#*`~_>|]/g, '') // 移除markdown符号
+        .replace(/\n{2,}/g, '\n') // 多个换行合并
+        .trim();
+      if (!cleanText) {
+        toast.error('没有可播放的文本内容');
+        setPlayingTtsIndex(null);
+        return;
+      }
+      // 截取前2000字符
+      const truncated = cleanText.substring(0, 2000);
+      const response = await fetch('/api/tts/synthesize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ text: truncated }),
+        signal: abortController.signal,
+      });
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `TTS请求失败: ${response.status}`);
+      }
+      const audioBlob = await response.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      ttsAudioRef.current = audio;
+      audio.onended = () => {
+        setPlayingTtsIndex(null);
+        ttsAudioRef.current = null;
+        URL.revokeObjectURL(audioUrl);
+      };
+      audio.onerror = () => {
+        setPlayingTtsIndex(null);
+        ttsAudioRef.current = null;
+        URL.revokeObjectURL(audioUrl);
+        toast.error('音频播放失败');
+      };
+      await audio.play();
+    } catch (err: any) {
+      if (err.name === 'AbortError') return;
+      console.error('[TTS] Error:', err);
+      toast.error(err.message || '语音合成失败');
+      setPlayingTtsIndex(null);
+    }
+  };
+  // 组件卸载时清理TTS
+  useEffect(() => {
+    return () => {
+      if (ttsAbortRef.current) ttsAbortRef.current.abort();
+      if (ttsAudioRef.current) {
+        ttsAudioRef.current.pause();
+        ttsAudioRef.current = null;
+      }
+    };
+  }, []);
 
   // 处理拖拽事件
   const handleDragOver = (e: React.DragEvent) => {
@@ -1102,6 +1193,15 @@ export default function Chat() {
                 researchPrompt: msg.researchPrompt,
               };
             }
+            if (msg.isAutomationTask) {
+              return {
+                ...msg,
+                isAutomationTask: true,
+                automationTaskId: msg.automationTaskId,
+                automationTaskName: msg.automationTaskName,
+                automationSiteName: msg.automationSiteName,
+              };
+            }
             if (msg.isVideoTask) {
             return {
               ...msg,
@@ -1170,6 +1270,18 @@ export default function Chat() {
         toast.error("加载对话历史失败，请稍后重试");
       }
     }
+  };
+
+
+  // === 停止流式传输 ===
+  const handleStopStreaming = () => {
+    if (abortStream) {
+      abortStream();
+    }
+    setIsStreamingMessage(false);
+    // 通知模拟思考流程完成
+    onStreamComplete();
+    toast.info('已停止回复');
   };
 
   const handleSendMessage = async (messageText?: string) => {
@@ -1253,10 +1365,28 @@ export default function Chat() {
       return; // 不走普通消息流程
     }
 
-    // 检测图片生成意图（关键词匹配）
+    // 检测图片生成意图（关键词匹配 + 历史对话上下文）
     const imageKeywords = ['生成图片', '制作图片', '创建图片', '生成一张图', '生成一张图片', '做一张图', '做个图片', '配上一张', '配上图片', '配图', 'generate image', 'create image', 'make image', '画一张', '继续生成', '再生成', '再来一张', '再画一张', '重新生成', '生成类似的', '生成相似的', '类似的图', '相似的图', '同样的图', '同样风格'];
-    const hasImageGenerationIntent = textToSend.trim() && 
+    
+    // 检查历史对话中是否有图片生成记录（用于上下文关联）
+    const hasRecentImageGeneration = messages.some((msg, idx) => 
+      msg.role === 'assistant' && msg.images && msg.images.length > 0 && idx >= messages.length - 6
+    );
+    
+    // 上下文关联关键词：当历史中有图片生成时，这些模糊指令也应触发图片生成
+    const contextualImageKeywords = ['换个风格', '换一种', '改一下', '修改一下', '调整一下', '再来', '再试', '不满意', '换个颜色', '更亮一点', '更暗一点', '更大一点', '更小一点', '加上', '去掉', '改成', '变成'];
+    
+    const hasDirectImageIntent = textToSend.trim() && 
       imageKeywords.some(keyword => textToSend.toLowerCase().includes(keyword.toLowerCase()));
+    
+    const hasContextualImageIntent = hasRecentImageGeneration && textToSend.trim() &&
+      contextualImageKeywords.some(keyword => textToSend.toLowerCase().includes(keyword.toLowerCase()));
+    
+    const hasImageGenerationIntent = hasDirectImageIntent || hasContextualImageIntent;
+    
+    if (hasContextualImageIntent && !hasDirectImageIntent) {
+      console.log('[IMAGE CONTEXT] Contextual image intent detected based on conversation history');
+    }
     
     // 检测是否是“继续生成”类型的指令（需要上下文记忆）
     const continueKeywords = ['继续生成', '再生成', '再来一张', '再画一张', '重新生成', '生成类似的', '生成相似的', '类似的图', '相似的图', '同样的图', '同样风格'];
@@ -1646,6 +1776,21 @@ export default function Chat() {
             }
             
             return newLogs;
+          });
+        },
+        onAutomationTask: (data) => {
+          // 处理自动化任务事件 - 将当前助手消息标记为自动化任务
+          console.log('[Chat] Automation task created:', data);
+          setMessages((prev) => {
+            const newMessages = [...prev];
+            const lastMessage = newMessages[newMessages.length - 1];
+            if (lastMessage && lastMessage.role === 'assistant') {
+              (lastMessage as any).isAutomationTask = true;
+              (lastMessage as any).automationTaskId = data.taskId;
+              (lastMessage as any).automationTaskName = data.taskName;
+              (lastMessage as any).automationSiteName = data.siteName;
+            }
+            return [...newMessages]; // 创建新数组触发重渲染
           });
         },
         onIntentConfirm: (data) => {
@@ -2515,122 +2660,6 @@ export default function Chat() {
                             {formatRelativeTime(msg.timestamp)}
                           </div>
                         )}
-                        {/* 消息操作按钮（hover显示，移动端隐藏） */}
-                        <div className={`hidden md:flex absolute ${msg.role === "user" ? "left-0 -translate-x-full" : "right-0 translate-x-full"} top-2 opacity-0 group-hover:opacity-100 transition-opacity gap-1 px-2`}>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7 p-0"
-                            onClick={() => {
-                              navigator.clipboard.writeText(msg.content);
-                              toast.success(t('chat.copy'));
-                            }}
-                            title={t('chat.copy')}
-                          >
-                            <Copy className="h-3.5 w-3.5" />
-                          </Button>
-                          {msg.role === "assistant" && (
-                            <>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0"
-                                onClick={() => {
-                                  // TODO: 实现重新生成功能
-                                  toast.info(t('chat.regenerate'));
-                                }}
-                                title={t('chat.regenerate')}
-                              >
-                                <RotateCcw className="h-3.5 w-3.5" />
-                              </Button>
-                              <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 w-7 p-0"
-                                    title={t("chat.downloadBtn")}
-                                  >
-                                    <Download className="h-3.5 w-3.5" />
-                                  </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent>
-                                  <DropdownMenuItem onClick={async () => {
-                                    const blob = new Blob([msg.content], { type: "text/plain" });
-                                    const url = URL.createObjectURL(blob);
-                                    const a = document.createElement("a");
-                                    a.href = url;
-                                    a.download = `message-${Date.now()}.md`;
-                                    a.click();
-                                    URL.revokeObjectURL(url);
-                                    toast.success("已下载");
-                                  }}>
-                                    下载为Markdown
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={async () => {
-                                    let progress = 0;
-                                    const toastId = "generate-doc";
-                                    
-                                    toast.loading(`正在生成Word文档... 0%`, { id: toastId });
-                                    const progressInterval = setInterval(() => {
-                                      progress += 10;
-                                      if (progress <= 90) {
-                                        toast.loading(`正在生成Word文档... ${progress}%`, { id: toastId });
-                                      }
-                                    }, 200);
-                                    
-                                    generateDocumentMutation.mutate({
-                                      title: `对话内容-${new Date().toLocaleDateString('zh-CN')}`,
-                                      content: msg.content,
-                                    }, {
-                                      onSuccess: (result) => {
-                                        clearInterval(progressInterval);
-                                        toast.success("文档生成成功！正在下载...", { id: toastId });
-                                        const a = document.createElement("a");
-                                        a.href = result.url;
-                                        a.download = result.fileName;
-                                        a.click();
-                                        
-                                        setTimeout(() => {
-                                          toast.success("文档下载完成！", { id: toastId });
-                                        }, 500);
-                                      },
-                                      onError: (error: any) => {
-                                        clearInterval(progressInterval);
-                                        toast.error(error.message || "文档生成失败", { id: toastId });
-                                      }
-                                    });
-                                  }}>
-                                    下载为Word
-                                  </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={async () => {
-                                    if (selectedConversationId) {
-                                      exportPdfMutation.mutate({ id: selectedConversationId });
-                                    } else {
-                                      toast.error("请先保存对话");
-                                    }
-                                  }}>
-                                    下载为PDF
-                                  </DropdownMenuItem>
-                                </DropdownMenuContent>
-                              </DropdownMenu>
-                            </>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                            onClick={() => {
-                              if (confirm(t('chat.confirmDelete'))) {
-                                setMessages(prev => prev.filter((_, i) => i !== index));
-                                toast.success(t('chat.delete'));
-                              }
-                            }}
-                            title={t('chat.delete')}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
                         {msg.role === "assistant" ? (
                           <div className="flex flex-col w-full max-w-[850px] ml-0 pl-0">
                             {/* AI头像 - 圆形动感图标（移动到顶部左侧） */}
@@ -2648,19 +2677,7 @@ export default function Chat() {
                                   </span>
                                 )}
                               </div>
-                              {/* 复制按钮 */}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                                onClick={() => {
-                                  navigator.clipboard.writeText(msg.content);
-                                  toast.success(t('chat.copied'));
-                                }}
-                                title={t('chat.copy')}
-                              >
-                                <Copy className="h-3.5 w-3.5" />
-                              </Button>
+
                             </div>
                             {/* 移除冗余图标，保持单一头像设计 */}
                             <div className="flex-1 min-w-0 space-y-2 overflow-visible text-[15px] leading-relaxed text-foreground/90 min-h-[24px] md:border-l-4 md:border-blue-500 md:pl-4" style={{ wordWrap: 'break-word', overflowWrap: 'break-word', wordBreak: 'break-word' }}>
@@ -3054,6 +3071,12 @@ export default function Chat() {
                                   taskId={(msg as any).videoTaskId}
                                   prompt={(msg as any).videoPrompt}
                                 />
+                              ) : (msg as any).isAutomationTask ? (
+                                <AutomationTaskCard
+                                  taskId={(msg as any).automationTaskId}
+                                  taskName={(msg as any).automationTaskName || "自动化任务"}
+                                  siteName={(msg as any).automationSiteName || "目标网站"}
+                                />
                               ) : (
                                 <div className="w-full ml-0 pl-0 space-y-3">
                                   {/* 图片区域（全宽，位于顶部） */}
@@ -3245,6 +3268,7 @@ export default function Chat() {
                                 </div>
                               )}
                             </div>
+
                           </div>
                         ) : (
                           <div className="space-y-2 text-[15px] leading-relaxed" style={{ wordWrap: 'break-word', overflowWrap: 'break-word', wordBreak: 'break-word', maxWidth: '100%' }}>
@@ -3317,6 +3341,179 @@ export default function Chat() {
                             )}
                           </div>
                         )}
+                        {/* 消息操作按钮（hover显示，移动端隐藏） */}
+                        <div className={`hidden md:flex ${msg.role === "user" ? "justify-end" : "justify-start"} opacity-0 group-hover:opacity-100 transition-opacity gap-1 mt-1`}>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0"
+                            onClick={() => {
+                              navigator.clipboard.writeText(msg.content);
+                              toast.success(t('chat.copy'));
+                            }}
+                            title={t('chat.copy')}
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </Button>
+                          {msg.role === "assistant" && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                onClick={() => {
+                                  // TODO: 实现重新生成功能
+                                  toast.info(t('chat.regenerate'));
+                                }}
+                                title={t('chat.regenerate')}
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                              </Button>
+                                                            {/* TTS语音播放按钮 */}
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className={`h-7 w-7 p-0 ${playingTtsIndex === index ? 'text-primary animate-pulse' : ''}`}
+                                onClick={() => handleTtsPlay(msg.content, index)}
+                                title={playingTtsIndex === index ? "停止播放" : "语音播放"}
+                              >
+                                {playingTtsIndex === index ? (
+                                  <Square className="h-3 w-3 fill-current" />
+                                ) : (
+                                  <Volume2 className="h-3.5 w-3.5" />
+                                )}
+                              </Button>
+<DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 w-7 p-0"
+                                    title={t("chat.downloadBtn")}
+                                  >
+                                    <Download className="h-3.5 w-3.5" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent>
+                                  <DropdownMenuItem onClick={async () => {
+                                    const blob = new Blob([msg.content], { type: "text/plain" });
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement("a");
+                                    a.href = url;
+                                    a.download = `message-${Date.now()}.md`;
+                                    a.click();
+                                    URL.revokeObjectURL(url);
+                                    toast.success("已下载");
+                                  }}>
+                                    下载为Markdown
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={async () => {
+                                    let progress = 0;
+                                    const toastId = "generate-doc";
+                                    
+                                    toast.loading(`正在生成Word文档... 0%`, { id: toastId });
+                                    const progressInterval = setInterval(() => {
+                                      progress += 10;
+                                      if (progress <= 90) {
+                                        toast.loading(`正在生成Word文档... ${progress}%`, { id: toastId });
+                                      }
+                                    }, 200);
+                                    
+                                    generateDocumentMutation.mutate({
+                                      title: `对话内容-${new Date().toLocaleDateString('zh-CN')}`,
+                                      content: msg.content,
+                                    }, {
+                                      onSuccess: (result) => {
+                                        clearInterval(progressInterval);
+                                        toast.success("文档生成成功！正在下载...", { id: toastId });
+                                        const a = document.createElement("a");
+                                        a.href = result.url;
+                                        a.download = result.fileName;
+                                        a.click();
+                                        
+                                        setTimeout(() => {
+                                          toast.success("文档下载完成！", { id: toastId });
+                                        }, 500);
+                                      },
+                                      onError: (error: any) => {
+                                        clearInterval(progressInterval);
+                                        toast.error(error.message || "文档生成失败", { id: toastId });
+                                      }
+                                    });
+                                  }}>
+                                    下载为Word
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={async () => {
+                                    if (selectedConversationId) {
+                                      exportPdfMutation.mutate({ id: selectedConversationId });
+                                    } else {
+                                      toast.error("请先保存对话");
+                                    }
+                                  }}>
+                                    下载为PDF
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                            onClick={() => {
+                              if (confirm(t('chat.confirmDelete'))) {
+                                setMessages(prev => prev.filter((_, i) => i !== index));
+                                toast.success(t('chat.delete'));
+                              }
+                            }}
+                            title={t('chat.delete')}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                        {/* 移动端消息操作按钮 */}
+                        <div className="flex md:hidden gap-1 mt-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-muted-foreground/60"
+                            onClick={() => {
+                              navigator.clipboard.writeText(msg.content);
+                              toast.success(t('chat.copy'));
+                            }}
+                            title={t('chat.copy')}
+                          >
+                            <Copy className="h-3 w-3" />
+                          </Button>
+                          {msg.role === "assistant" && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className={`h-6 w-6 p-0 ${playingTtsIndex === index ? 'text-primary animate-pulse' : 'text-muted-foreground/60'}`}
+                                onClick={() => handleTtsPlay(msg.content, index)}
+                                title={playingTtsIndex === index ? "停止播放" : "语音播放"}
+                              >
+                                {playingTtsIndex === index ? (
+                                  <Square className="h-2.5 w-2.5 fill-current" />
+                                ) : (
+                                  <Volume2 className="h-3 w-3" />
+                                )}
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 w-6 p-0 text-muted-foreground/60"
+                                onClick={() => {
+                                  toast.info(t('chat.regenerate'));
+                                }}
+                                title={t('chat.regenerate')}
+                              >
+                                <RotateCcw className="h-3 w-3" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
                       </div>
                       {/* 显示思考时间 */}
                       {msg.role === "assistant" && msg.sentAt && msg.respondedAt && (
@@ -3770,6 +3967,10 @@ export default function Chat() {
                         setHasInputContent(value.trim().length > 0);
                       }}
                       onSend={(payload: SendMessagePayload) => {
+                        // 如果正在流式传输，先中断当前回复
+                        if (isStreamingMessage) {
+                          handleStopStreaming();
+                        }
                         // 从 ChatInput 接收文本和附件
                         // 如果有附件，更新附件状态
                         if (payload.attachments) {
@@ -3823,7 +4024,7 @@ export default function Chat() {
                           }
                         }
                       }}
-                      disabled={isStreamingMessage}
+                      disabled={false}
                       uploadedImages={uploadedImages}
                       uploadedFiles={uploadedFiles}
                     />
@@ -3835,30 +4036,41 @@ export default function Chat() {
                           const currentValue = chatInputRef.current?.getValue() || "";
                           chatInputRef.current?.setInput(currentValue + text);
                         }}
-                        disabled={isStreamingMessage}
+                        disabled={false}
                         language="zh"
                       />
                     
                       {/* 右侧发送按钮 */}
                       <Button
                         onClick={() => {
-                          const value = chatInputRef.current?.getValue() || "";
-                          if (value.trim() || uploadedImages.length > 0 || uploadedFiles.length > 0) {
-                            // 直接传递text给handleSendMessage，避免异步状态更新问题
-                            handleSendMessage(value);
-                            chatInputRef.current?.clear();
-                            // 重置输入框内容状态
-                            setHasInputContent(false);
-                            // 清空附件状态将由 handleSendMessage 处理
+                          if (isStreamingMessage) {
+                            // 正在流式传输时，点击按钮停止当前回复
+                            const value = chatInputRef.current?.getValue() || "";
+                            handleStopStreaming();
+                            if (value.trim()) {
+                              // 如果有输入内容，延迟发送新消息
+                              setTimeout(() => {
+                                handleSendMessage(value);
+                                chatInputRef.current?.clear();
+                                setHasInputContent(false);
+                              }, 100);
+                            }
+                          } else {
+                            const value = chatInputRef.current?.getValue() || "";
+                            if (value.trim() || uploadedImages.length > 0 || uploadedFiles.length > 0) {
+                              handleSendMessage(value);
+                              chatInputRef.current?.clear();
+                              setHasInputContent(false);
+                            }
                           }
                         }}
-                        disabled={isStreamingMessage || (!hasInputContent && uploadedImages.length === 0 && uploadedFiles.length === 0)}
+                        disabled={!isStreamingMessage && !hasInputContent && uploadedImages.length === 0 && uploadedFiles.length === 0}
                         size="icon"
-                        className="h-9 w-9 md:h-10 md:w-10 rounded-full bg-primary hover:bg-primary/90 flex-shrink-0 shadow-lg transition-all hover:scale-105"
+                        className={`h-9 w-9 md:h-10 md:w-10 rounded-full flex-shrink-0 shadow-lg transition-all hover:scale-105 ${isStreamingMessage ? 'bg-destructive hover:bg-destructive/90' : 'bg-primary hover:bg-primary/90'}`}
                         type="button"
                       >
                         {isStreamingMessage ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <StopCircle className="h-4 w-4" />
                         ) : (
                           <Send className="h-4 w-4" />
                         )}
