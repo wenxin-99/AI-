@@ -273,7 +273,7 @@ async function captureAndEmit(page: Page, taskId: number, description: string): 
     const base64 = buffer.toString("base64");
     
     // 通过 Socket.io 推送截图
-    emitBrowserScreenshot(taskId, `data:image/jpeg;base64,${base64}`, page.url());
+    emitBrowserScreenshot(taskId, base64, page.url());
     
     return base64;
   } catch (e) {
@@ -1318,7 +1318,7 @@ export async function enableTakeover(taskId: number): Promise<boolean> {
   // 发送当前页面截图
   try {
     const buffer = await page.screenshot({ type: "jpeg", quality: 70 }) as Buffer;
-    const base64 = `data:image/jpeg;base64,${buffer.toString("base64")}`;
+    const base64 = buffer.toString("base64");
     emitBrowserScreenshot(taskId, base64, page.url());
   } catch (e) {}
   
@@ -1386,7 +1386,7 @@ export async function handleTakeoverAction(taskId: number, action: string, paylo
     // 操作后截图并推送
     await new Promise(r => setTimeout(r, 500));
     const buffer = await page.screenshot({ type: "jpeg", quality: 70 }) as Buffer;
-    const base64 = `data:image/jpeg;base64,${buffer.toString("base64")}`;
+    const base64 = buffer.toString("base64");
     emitBrowserScreenshot(taskId, base64, page.url());
     
   } catch (err: any) {
